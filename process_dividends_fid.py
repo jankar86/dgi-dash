@@ -1,5 +1,6 @@
 import pandas as pd
 import sqlite3
+from sqlite3 import IntegrityError
 
 # Load the CSV file
 csv_file_path = 'data/fid-dev.csv'
@@ -12,11 +13,14 @@ data.columns = [
     'amount', 'settlement_date'
 ]
 
+# Ensure transaction_date is in a consistent format
+#data['transaction_date'] = pd.to_datetime(data['transaction_date']).dt.strftime('%Y-%m-%d')
+
 # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
 filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
 
 # Create an SQLite database
-db_path = 'data/dividends.db'
+db_path = 'data/fid-dividends.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
@@ -52,9 +56,17 @@ CREATE TABLE IF NOT EXISTS dividends (
 cursor.execute(create_dividends_table_query)
 conn.commit()
 
-# Insert unique account numbers into the accounts table
+# Insert unique account numbers into the accounts table with error handling
 accounts = filtered_data[['account']].drop_duplicates().rename(columns={'account': 'account_number'})
-accounts.to_sql('accounts', conn, if_exists='append', index=False)
+
+for index, row in accounts.iterrows():
+    try:
+        cursor.execute('''
+        INSERT INTO accounts (account_number) VALUES (?)
+        ''', (row['account_number'],))
+        conn.commit()
+    except IntegrityError as e:
+        print(f"Duplicate account entry found: {e}")
 
 # Retrieve account IDs
 account_id_map = pd.read_sql_query('SELECT account_id, account_number FROM accounts', conn)
@@ -66,8 +78,16 @@ columns_to_insert = [
     'quantity', 'price', 'commission', 'amount', 'account_id'
 ]
 
-# Insert the filtered data into the SQLite database
-filtered_data[columns_to_insert].to_sql('dividends', conn, if_exists='append', index=False)
+# Insert the filtered data into the SQLite database with error handling for duplicates
+for index, row in filtered_data[columns_to_insert].iterrows():
+    try:
+        cursor.execute('''
+        INSERT INTO dividends (transaction_date, transaction_type, symbol, description, quantity, price, commission, amount, account_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', tuple(row))
+        conn.commit()
+    except IntegrityError as e:
+        print(f"Duplicate dividend entry found: {e}")
 
 # Verify the data has been inserted
 cursor.execute('SELECT * FROM dividends LIMIT 5')
