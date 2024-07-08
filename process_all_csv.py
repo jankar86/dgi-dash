@@ -3,19 +3,17 @@ import sqlite3
 import os
 
 def load_and_process_csv(file_path):
-    # Read the first row to get the account number
+    # Read the first row to get the account number for specific format
     with open(file_path, 'r') as file:
-        account_info = file.readline().strip()
+        first_row = file.readline().strip()
     
-    # Extract account number from the account_info string
-    account_number = account_info.split(',')[-1].strip()
+    # Determine the format based on the first row # If Action detected in first row Account_number doesn't need to be added
+    if 'Action' in first_row:
+        print("'Action' detected for Fid CSV type")
+        # Do not skip the first row
+        data = pd.read_csv(file_path)
 
-    # Read the rest of the CSV file, skipping the first row
-    data = pd.read_csv(file_path, skiprows=1)
-    
-    # Detect the format based on column names
-    if 'Action' in data.columns:
-        # Format 1 - Fidelity CSV Type
+        # Format 1
         data.columns = [
             'run_date', 'account', 'action', 'symbol', 'description', 'type', 
             'quantity', 'price', 'commission', 'fees', 'accrued_interest', 
@@ -23,18 +21,25 @@ def load_and_process_csv(file_path):
         ]
         # Filter rows where the action is "DIVIDEND RECEIVED"
         filtered_data = data[data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
-    elif 'TransactionType' in data.columns:
-        # Format 2 - Etrade CSV Type
+    
+    elif 'Account' in first_row:
+        # Skip the first row and read the rest of the CSV file
+        data = pd.read_csv(file_path, skiprows=1)
+        # Extract account number from the account_info string if applicable
+        account_number = first_row.split(',')[-1].strip()
+        
+        # Format 2
         data.columns = [
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
             'quantity', 'amount', 'price', 'commission', 'description'
         ]
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)]
+    
     else:
         raise ValueError("Unknown CSV format")
     
-    # Append account number to each row (for Format 1)
+    # Append account number to each row
     filtered_data['account_number'] = account_number
     
     return filtered_data
@@ -111,7 +116,7 @@ def insert_into_db(filtered_data, db_path):
 # Directory containing CSV files
 csv_directory = 'data/'
 #db_path = 'data/etrade-dividends.db'
-db_path = 'data/fid-dividends.db'
+db_path = 'data/etrade-dividends.db'
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
