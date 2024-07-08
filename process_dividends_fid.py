@@ -36,17 +36,18 @@ table_creation_query = '''
 CREATE TABLE IF NOT EXISTS dividends (
     id INTEGER PRIMARY KEY,
     transaction_date TEXT,
-    account TEXT,
     transaction_type TEXT,
     symbol TEXT,
-    description TEXT,
     quantity REAL,
+    amount REAL,
     price REAL,
     commission REAL,
-    amount REAL,
+    description TEXT,
+    account TEXT,
     UNIQUE(transaction_date, account, symbol, amount)
 )
 '''
+
 cursor.execute(table_creation_query)
 conn.commit()
 
