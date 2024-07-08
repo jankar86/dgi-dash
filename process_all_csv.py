@@ -15,7 +15,7 @@ def load_and_process_csv(file_path):
     
     # Detect the format based on column names
     if 'Action' in data.columns:
-        # Format 1
+        # Format 1 - Fidelity CSV Type
         data.columns = [
             'run_date', 'account', 'action', 'symbol', 'description', 'type', 
             'quantity', 'price', 'commission', 'fees', 'accrued_interest', 
@@ -24,7 +24,7 @@ def load_and_process_csv(file_path):
         # Filter rows where the action is "DIVIDEND RECEIVED"
         filtered_data = data[data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
     elif 'TransactionType' in data.columns:
-        # Format 2
+        # Format 2 - Etrade CSV Type
         data.columns = [
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
             'quantity', 'amount', 'price', 'commission', 'description'
@@ -110,7 +110,8 @@ def insert_into_db(filtered_data, db_path):
 
 # Directory containing CSV files
 csv_directory = 'data/'
-db_path = 'data/etrade-dividends.db'
+#db_path = 'data/etrade-dividends.db'
+db_path = 'data/fid-dividends.db'
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
