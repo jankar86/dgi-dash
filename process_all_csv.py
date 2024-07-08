@@ -116,7 +116,7 @@ def insert_into_db(filtered_data, db_path):
 # Directory containing CSV files
 csv_directory = 'data/'
 #db_path = 'data/etrade-dividends.db'
-db_path = 'data/etrade-dividends.db'
+db_path = 'data/dividends.db'
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):

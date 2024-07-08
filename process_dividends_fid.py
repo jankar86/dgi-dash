@@ -16,7 +16,7 @@ data.columns = [
 filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
 
 # Create an SQLite database
-db_path = 'data/fid-dividends.db'
+db_path = 'data/dividends.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
@@ -31,8 +31,8 @@ CREATE TABLE IF NOT EXISTS accounts (
 cursor.execute(create_accounts_table_query)
 conn.commit()
 
-# Create a table in the SQLite database
-table_creation_query = '''
+# Create the dividends table with a foreign key reference to the accounts table
+create_dividends_table_query = '''
 CREATE TABLE IF NOT EXISTS dividends (
     id INTEGER PRIMARY KEY,
     transaction_date TEXT,
@@ -43,24 +43,31 @@ CREATE TABLE IF NOT EXISTS dividends (
     price REAL,
     commission REAL,
     description TEXT,
-    account TEXT,
-    UNIQUE(transaction_date, account, symbol, amount)
+    account_id INTEGER,
+    FOREIGN KEY (account_id) REFERENCES accounts(account_id),
+    UNIQUE(transaction_date, account_id, symbol, amount)
 )
 '''
 
-cursor.execute(table_creation_query)
+cursor.execute(create_dividends_table_query)
 conn.commit()
 
-# Select only the columns needed for insertion, excluding 'type'
+# Insert unique account numbers into the accounts table
+accounts = filtered_data[['account']].drop_duplicates().rename(columns={'account': 'account_number'})
+accounts.to_sql('accounts', conn, if_exists='append', index=False)
+
+# Retrieve account IDs
+account_id_map = pd.read_sql_query('SELECT account_id, account_number FROM accounts', conn)
+filtered_data = filtered_data.merge(account_id_map, left_on='account', right_on='account_number', how='left')
+
+# Select only the columns needed for insertion, including the new account_id column and excluding 'account'
 columns_to_insert = [
-    'transaction_date', 'account', 'transaction_type', 'symbol', 'description', 
-    'quantity', 'price', 'commission', 'amount'
+    'transaction_date', 'transaction_type', 'symbol', 'description', 
+    'quantity', 'price', 'commission', 'amount', 'account_id'
 ]
 
 # Insert the filtered data into the SQLite database
-#filtered_data.to_sql('dividends', conn, if_exists='append', index=False)
 filtered_data[columns_to_insert].to_sql('dividends', conn, if_exists='append', index=False)
-
 
 # Verify the data has been inserted
 cursor.execute('SELECT * FROM dividends LIMIT 5')
