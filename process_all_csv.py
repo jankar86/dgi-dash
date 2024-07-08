@@ -1,5 +1,6 @@
 import pandas as pd
 import sqlite3
+import os
 
 def load_and_process_csv(file_path):
     # Read the first row to get the account number
@@ -107,16 +108,18 @@ def insert_into_db(filtered_data, db_path):
     
     return rows
 
-# Paths to your CSV files and SQLite database
-csv_file_paths = ['data/etrade-9153.csv']
+# Directory containing CSV files
+csv_directory = 'data/'
 db_path = 'data/etrade-dividends.db'
 
-# Process each CSV file
-for file_path in csv_file_paths:
-    try:
-        filtered_data = load_and_process_csv(file_path)
-        rows = insert_into_db(filtered_data, db_path)
-        print(f"Data from {file_path} inserted successfully:")
-        print(rows)
-    except ValueError as e:
-        print(f"Error processing {file_path}: {e}")
+# Process each CSV file in the directory
+for file_name in os.listdir(csv_directory):
+    if file_name.endswith('.csv'):
+        file_path = os.path.join(csv_directory, file_name)
+        try:
+            filtered_data = load_and_process_csv(file_path)
+            rows = insert_into_db(filtered_data, db_path)
+            print(f"Data from {file_path} inserted successfully:")
+            print(rows)
+        except ValueError as e:
+            print(f"Error processing {file_path}: {e}")
