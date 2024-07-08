@@ -14,7 +14,7 @@ def load_and_process_csv(file_path):
     
     # Detect the format based on column names
     if 'Action' in data.columns:
-        # Format 1 - etrade csv format
+        # Format 1
         data.columns = [
             'run_date', 'account', 'action', 'symbol', 'description', 'type', 
             'quantity', 'price', 'commission', 'fees', 'accrued_interest', 
@@ -23,7 +23,7 @@ def load_and_process_csv(file_path):
         # Filter rows where the action is "DIVIDEND RECEIVED"
         filtered_data = data[data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
     elif 'TransactionType' in data.columns:
-        # Format 2 - Fidelity csv format
+        # Format 2
         data.columns = [
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
             'quantity', 'amount', 'price', 'commission', 'description'
@@ -64,7 +64,8 @@ def insert_into_db(filtered_data, db_path):
         commission REAL,
         description TEXT,
         account_id INTEGER,
-        FOREIGN KEY(account_id) REFERENCES accounts(account_id)
+        FOREIGN KEY(account_id) REFERENCES accounts(account_id),
+        UNIQUE(transaction_date, transaction_type, symbol, amount, account_id)
     )
     '''
     cursor.execute(create_dividends_table_query)
