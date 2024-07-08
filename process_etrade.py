@@ -2,24 +2,36 @@ import pandas as pd
 import sqlite3
 
 # Load the new CSV file
-new_csv_file_path = 'data/etrade-dev.csv'
-new_data = pd.read_csv(new_csv_file_path)
+new_csv_file_path = 'data/etrade-9153.csv'
+#new_data = pd.read_csv(new_csv_file_path)
 
 # Display the first few rows of the dataframe to understand its structure
-print(new_data.head())
+#print(new_data.head())
+
+with open(new_csv_file_path, 'r') as file:
+        account_info = file.readline().strip()
+    
+# Extract account number from the account_info string
+account_number = account_info.split(',')[-1].strip()
+print(account_number)
+# Read the rest of the CSV file, skipping the first row
+data = pd.read_csv(new_csv_file_path, skiprows=2)
+print(data.head())
 
 # Rename columns to match the table schema (adjust the column names based on the new CSV structure)
-new_data.columns = [
-    'run_date', 'account', 'action', 'symbol', 'description', 'type', 
-    'quantity', 'price', 'commission', 'fees', 'accrued_interest', 
-    'amount', 'settlement_date'
+data.columns = [
+    'TransactionDate', 'TransactionType', 'SecurityType', 'Symbol', 'Quantity', 'Amount', 
+    'Price', 'Commission', 'Description'
 ]
 
 # Filter rows where the action is "DIVIDEND RECEIVED"
-filtered_data = new_data[new_data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
+filtered_data = data[data['TransactionType'].str.contains('Dividend', case=False, na=False)]
+
+# Add an empty 'account' column to match the database schema
+filtered_data['account'] = account_number
 
 # Create an SQLite database
-db_path = 'path_to_your_file/dividends.db'
+db_path = 'data/dividends_etrade.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
@@ -46,10 +58,10 @@ cursor.execute(table_creation_query)
 conn.commit()
 
 # Insert the filtered data into the SQLite database
-filtered_data.to_sql('dividends', conn, if_exists='append', index=False)
+filtered_data.to_sql('Dividend', conn, if_exists='append', index=False)
 
 # Verify the data has been inserted
-cursor.execute('SELECT * FROM dividends LIMIT 5')
+cursor.execute('SELECT * FROM Dividend LIMIT 25')
 rows = cursor.fetchall()
 
 # Close the connection
