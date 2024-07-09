@@ -1,6 +1,7 @@
 import pandas as pd
 import sqlite3
 from sqlite3 import IntegrityError
+from datetime import datetime
 
 # Load the CSV file
 csv_file_path = 'data/fid-dev.csv'
@@ -14,7 +15,9 @@ data.columns = [
 ]
 
 # Ensure transaction_date is in a consistent format
-#data['transaction_date'] = pd.to_datetime(data['transaction_date']).dt.strftime('%Y-%m-%d')
+
+# Convert transaction_date to a four-digit year format
+data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.strftime('%m/%d/%Y')
 
 # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
 filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
@@ -39,8 +42,9 @@ conn.commit()
 create_dividends_table_query = '''
 CREATE TABLE IF NOT EXISTS dividends (
     id INTEGER PRIMARY KEY,
-    transaction_date TEXT,
+    transaction_date DATE,
     transaction_type TEXT,
+    security_type TEXT,
     symbol TEXT,
     quantity REAL,
     amount REAL,

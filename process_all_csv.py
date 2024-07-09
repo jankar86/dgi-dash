@@ -1,6 +1,7 @@
 import pandas as pd
 import sqlite3
 import os
+from datetime import datetime
 
 def load_and_process_csv(file_path):
     # Read the first row to get the account number for specific format
@@ -34,6 +35,9 @@ def load_and_process_csv(file_path):
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
             'quantity', 'amount', 'price', 'commission', 'description'
         ]
+        # Convert transaction_date to a four-digit year format
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.strftime('%m/%d/%Y')
+        
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)]
     
@@ -61,7 +65,7 @@ def insert_into_db(filtered_data, db_path):
     create_dividends_table_query = '''
     CREATE TABLE IF NOT EXISTS dividends (
         id INTEGER PRIMARY KEY,
-        transaction_date TEXT,
+        transaction_date DATE,
         transaction_type TEXT,
         security_type TEXT,
         symbol TEXT,
