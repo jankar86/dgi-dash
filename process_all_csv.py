@@ -9,26 +9,27 @@ def load_and_process_csv(file_path):
     
     # Determine the format based on the first row # If Action detected in first row Account_number doesn't need to be added
     if 'Action' in first_row:
-        print("'Action' detected for Fid CSV type")
+        print("'Action' detected for Fid CSV type - Unsupported function for now!")
         # Do not skip the first row
         data = pd.read_csv(file_path)
 
-        # Format 1
-        data.columns = [
-            'run_date', 'account', 'action', 'symbol', 'description', 'type', 
-            'quantity', 'price', 'commission', 'fees', 'accrued_interest', 
-            'amount', 'settlement_date'
-        ]
+        # Format 1 - Fidelity
+
+        # Add logic here
+
         # Filter rows where the action is "DIVIDEND RECEIVED"
-        filtered_data = data[data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
+        #filtered_data = data[data['action'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
+        
     
     elif 'Account' in first_row:
+        # Format 2 - Etrade CSV need to read first line to get account number data.
+
         # Skip the first row and read the rest of the CSV file
         data = pd.read_csv(file_path, skiprows=1)
         # Extract account number from the account_info string if applicable
         account_number = first_row.split(',')[-1].strip()
         
-        # Format 2
+        
         data.columns = [
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
             'quantity', 'amount', 'price', 'commission', 'description'
@@ -116,11 +117,11 @@ def insert_into_db(filtered_data, db_path):
 # Directory containing CSV files
 csv_directory = 'data/'
 #db_path = 'data/etrade-dividends.db'
-db_path = 'data/dividends.db'
+db_path = 'data/dividends_dev.db'
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
-    if file_name.endswith('.csv'):
+    if file_name.startswith('etrade-'):
         file_path = os.path.join(csv_directory, file_name)
         try:
             filtered_data = load_and_process_csv(file_path)

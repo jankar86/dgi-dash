@@ -20,7 +20,7 @@ data.columns = [
 filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
 
 # Create an SQLite database
-db_path = 'data/fid-dividends.db'
+db_path = 'data/dividends_dev.db'
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
 
