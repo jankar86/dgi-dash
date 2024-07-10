@@ -1,39 +1,34 @@
-import sqlite3
-from sqlite3 import IntegrityError
+from sqlalchemy import create_engine, Column, Integer, String, Date, Float, Text, ForeignKey, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
 
-def create_database(db_path):
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # Create tables in the SQLite database
-    create_accounts_table_query = '''
-    CREATE TABLE IF NOT EXISTS accounts (
-        account_id INTEGER PRIMARY KEY,
-        account_number TEXT UNIQUE
-    )
-    '''
-    cursor.execute(create_accounts_table_query)
+Base = declarative_base()
 
-    create_dividends_table_query = '''
-    CREATE TABLE IF NOT EXISTS dividends (
-        id INTEGER PRIMARY KEY,
-        transaction_date DATE,
-        transaction_type TEXT,
-        security_type TEXT,
-        symbol TEXT,
-        quantity REAL,
-        amount REAL,
-        price REAL,
-        commission REAL,
-        description TEXT,
-        account_id INTEGER,
-        FOREIGN KEY(account_id) REFERENCES accounts(account_id),
-        UNIQUE(transaction_date, transaction_type, symbol, amount, account_id)
-    )
-    '''
-    cursor.execute(create_dividends_table_query)
-    conn.commit()
-    conn.close()
+class Account(Base):
+    __tablename__ = 'accounts'
+    account_id = Column(Integer, primary_key=True)
+    account_number = Column(String, unique=True)
 
-def get_db_connection(db_path):
-    return sqlite3.connect(db_path)
+class Dividend(Base):
+    __tablename__ = 'dividends'
+    id = Column(Integer, primary_key=True)
+    transaction_date = Column(Date)
+    transaction_type = Column(String)
+    security_type = Column(String)
+    symbol = Column(String)
+    quantity = Column(Float)
+    amount = Column(Float)
+    price = Column(Float)
+    commission = Column(Float)
+    description = Column(Text)
+    account_id = Column(Integer, ForeignKey('accounts.account_id'))
+    __table_args__ = (UniqueConstraint('transaction_date', 'transaction_type', 'symbol', 'amount', 'account_id'),)
+
+def create_database(db_url):
+    engine = create_engine(db_url)
+    Base.metadata.create_all(engine)
+    return engine
+
+def get_session(engine):
+    Session = sessionmaker(bind=engine)
+    return Session()

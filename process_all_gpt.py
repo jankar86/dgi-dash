@@ -1,8 +1,8 @@
 import pandas as pd
 import os
-from sqlite3 import IntegrityError
 from datetime import datetime
-from db import create_database, get_db_connection
+from db import create_database, get_session, Account, Dividend
+from sqlalchemy.exc import IntegrityError
 
 def load_and_process_csv(file_path):
     # Read the first row to get the account number for specific format
@@ -51,25 +51,19 @@ def load_and_process_csv(file_path):
 
     return filtered_data
 
-def insert_into_db(filtered_data, db_path):
-    conn = get_db_connection(db_path)
-    cursor = conn.cursor()
-    
+def insert_into_db(filtered_data, session):
     # Insert unique account numbers into the accounts table with error handling
-    accounts = filtered_data[['account']].drop_duplicates().rename(columns={'account': 'account_number'})
+    account_numbers = filtered_data['account'].unique()
 
-    for index, row in accounts.iterrows():
-        try:
-            cursor.execute('''
-            INSERT INTO accounts (account_number) VALUES (?)
-            ''', (row['account_number'],))
-            conn.commit()
-        except IntegrityError as e:
-            print(f"Duplicate account entry found: {e}")
+    for account_number in account_numbers:
+        account = Account(account_number=account_number)
+        session.merge(account)
+    session.commit()
 
     # Retrieve account IDs
-    account_id_map = pd.read_sql_query('SELECT account_id, account_number FROM accounts', conn)
-    filtered_data = filtered_data.merge(account_id_map, left_on='account', right_on='account_number', how='left')
+    accounts = session.query(Account).all()
+    account_id_map = {account.account_number: account.account_id for account in accounts}
+    filtered_data['account_id'] = filtered_data['account'].map(account_id_map)
 
     # Select only the columns needed for insertion, including the new account_id column and excluding 'account'
     columns_to_insert = [
@@ -77,32 +71,40 @@ def insert_into_db(filtered_data, db_path):
         'quantity', 'price', 'commission', 'amount', 'account_id'
     ]
 
-    # Insert the filtered data into the SQLite database with error handling for duplicates
-    for index, row in filtered_data[columns_to_insert].iterrows():
+    # Insert the filtered data into the database with error handling for duplicates
+    for _, row in filtered_data[columns_to_insert].iterrows():
+        dividend = Dividend(
+            transaction_date=row['transaction_date'],
+            transaction_type=row['transaction_type'],
+            symbol=row['symbol'],
+            description=row['description'],
+            quantity=row['quantity'],
+            price=row['price'],
+            commission=row['commission'],
+            amount=row['amount'],
+            account_id=row['account_id']
+        )
         try:
-            cursor.execute('''
-            INSERT INTO dividends (transaction_date, transaction_type, symbol, description, quantity, price, commission, amount, account_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', tuple(row))
-            conn.commit()
-        except IntegrityError as e:
-            print(f"Duplicate dividend entry found: {e}")
+            session.add(dividend)
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            print(f"Duplicate dividend entry found: {row.to_dict()}")
 
     # Verify the data has been inserted
-    cursor.execute('SELECT * FROM dividends LIMIT 5')
-    rows = cursor.fetchall()
-
-    # Close the connection
-    conn.close()
+    rows = session.query(Dividend).limit(5).all()
     
     return rows
 
 # Directory containing CSV files
 csv_directory = 'data/'
-db_path = 'data/dividends_dev.db'
+
+# Database URL (Change this to switch between SQLite and MySQL)
+db_url = 'sqlite:///data/dividends_dev.db'  # SQLite
+# db_url = 'mysql+pymysql://username:password@host:port/database'  # MySQL
 
 # Create or initialize the database
-create_database(db_path)
+engine = create_database(db_url)
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
@@ -110,7 +112,8 @@ for file_name in os.listdir(csv_directory):
         file_path = os.path.join(csv_directory, file_name)
         try:
             filtered_data = load_and_process_csv(file_path)
-            rows = insert_into_db(filtered_data, db_path)
+            session = get_session(engine)
+            rows = insert_into_db(filtered_data, session)
             print(f"Data from {file_path} inserted successfully:")
             print(rows)
         except ValueError as e:
