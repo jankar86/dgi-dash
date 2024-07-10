@@ -1,6 +1,6 @@
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, date
 from db import create_database, get_session, Account, Dividend
 from sqlalchemy.exc import IntegrityError
 
@@ -22,7 +22,7 @@ def load_and_process_csv(file_path):
         ]
 
         # Ensure transaction_date is in a consistent format
-        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.strftime('%m/%d/%Y')
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
 
         # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
         filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
@@ -38,7 +38,7 @@ def load_and_process_csv(file_path):
         ]
 
         # Convert transaction_date to a four-digit year format
-        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.strftime('%m/%d/%Y')
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)]
