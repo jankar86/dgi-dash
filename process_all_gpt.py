@@ -4,6 +4,40 @@ import os
 from sqlite3 import IntegrityError
 from datetime import datetime
 
+def create_database(db_path):
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Create tables in the SQLite database
+    create_accounts_table_query = '''
+    CREATE TABLE IF NOT EXISTS accounts (
+        account_id INTEGER PRIMARY KEY,
+        account_number TEXT UNIQUE
+    )
+    '''
+    cursor.execute(create_accounts_table_query)
+
+    create_dividends_table_query = '''
+    CREATE TABLE IF NOT EXISTS dividends (
+        id INTEGER PRIMARY KEY,
+        transaction_date DATE,
+        transaction_type TEXT,
+        security_type TEXT,
+        symbol TEXT,
+        quantity REAL,
+        amount REAL,
+        price REAL,
+        commission REAL,
+        description TEXT,
+        account_id INTEGER,
+        FOREIGN KEY(account_id) REFERENCES accounts(account_id),
+        UNIQUE(transaction_date, transaction_type, symbol, amount, account_id)
+    )
+    '''
+    cursor.execute(create_dividends_table_query)
+    conn.commit()
+    conn.close()
+
 def load_and_process_csv(file_path):
     # Read the first row to get the account number for specific format
     with open(file_path, 'r') as file:
@@ -55,35 +89,6 @@ def insert_into_db(filtered_data, db_path):
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
-    # Create tables in the SQLite database
-    create_accounts_table_query = '''
-    CREATE TABLE IF NOT EXISTS accounts (
-        account_id INTEGER PRIMARY KEY,
-        account_number TEXT UNIQUE
-    )
-    '''
-    cursor.execute(create_accounts_table_query)
-
-    create_dividends_table_query = '''
-    CREATE TABLE IF NOT EXISTS dividends (
-        id INTEGER PRIMARY KEY,
-        transaction_date DATE,
-        transaction_type TEXT,
-        security_type TEXT,
-        symbol TEXT,
-        quantity REAL,
-        amount REAL,
-        price REAL,
-        commission REAL,
-        description TEXT,
-        account_id INTEGER,
-        FOREIGN KEY(account_id) REFERENCES accounts(account_id),
-        UNIQUE(transaction_date, transaction_type, symbol, amount, account_id)
-    )
-    '''
-    cursor.execute(create_dividends_table_query)
-    conn.commit()
-    
     # Insert unique account numbers into the accounts table with error handling
     accounts = filtered_data[['account']].drop_duplicates().rename(columns={'account': 'account_number'})
 
@@ -128,7 +133,10 @@ def insert_into_db(filtered_data, db_path):
 
 # Directory containing CSV files
 csv_directory = 'data/'
-db_path = 'data/dividends_gpt.db'
+db_path = 'data/dividends_dev.db'
+
+# Create or initialize the database
+create_database(db_path)
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
