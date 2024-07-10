@@ -25,7 +25,7 @@ def load_and_process_csv(file_path):
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
 
         # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
-        filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)]
+        filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)].copy()
     
     elif 'Account' in first_row:
         # Format 2 - Etrade CSV need to read first line to get account number data.
@@ -41,10 +41,10 @@ def load_and_process_csv(file_path):
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
 
         # Filter rows where the transaction_type is "Dividend"
-        filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)]
+        filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)].copy()
 
         # Append account number to each row
-        filtered_data['account'] = account_number
+        filtered_data.loc[:, 'account'] = account_number
     
     else:
         raise ValueError("Unknown CSV format")
@@ -66,6 +66,7 @@ def insert_into_db(filtered_data, session):
     filtered_data['account_id'] = filtered_data['account'].map(account_id_map)
 
     # Select only the columns needed for insertion, including the new account_id column and excluding 'account'
+    # Only needed for Format 1 data fidelity?
     columns_to_insert = [
         'transaction_date', 'transaction_type', 'symbol', 'description', 
         'quantity', 'price', 'commission', 'amount', 'account_id'
@@ -87,9 +88,12 @@ def insert_into_db(filtered_data, session):
         try:
             session.add(dividend)
             session.commit()
-        except IntegrityError:
+        except IntegrityError as e:
             session.rollback()
-            print(f"Duplicate dividend entry found: {row.to_dict()}")
+            if "UNIQUE constraint failed" in str(e):
+                print(f"Skipping duplicate entry: {row.to_dict()} - This value already exists in the database.")
+            else:
+                raise
 
     # Verify the data has been inserted
     rows = session.query(Dividend).limit(5).all()
