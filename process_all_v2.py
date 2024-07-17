@@ -24,11 +24,11 @@ def load_and_process_csv(file_path):
 
         # Ensure transaction_date is in a consistent format
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
-        #data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%Y', errors='coerce').dt.date
 
         # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
         filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)].copy()
-    
+        print(filtered_data['transaction_date'])
+
     elif 'Account' in first_row:
         # Format 2 - Etrade CSV need to read first line to get account number data.
         print(f"Data from {file_path} identified as Format #2 Etrade:")
@@ -44,8 +44,8 @@ def load_and_process_csv(file_path):
 
         # Convert transaction_date to a four-digit year format
         #data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
-        data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%Y', errors='coerce').dt.date
-        
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%y', errors='coerce').dt.date
+        print(data['transaction_date'])
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)].copy()
@@ -66,6 +66,7 @@ def load_and_process_csv(file_path):
 
         # Convert transaction_date to a four-digit year format
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
+        print(data['transaction_date'])
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data
@@ -139,14 +140,16 @@ engine = create_database(db_url)
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
-    #if file_name.endswith('.csv'):
-    if file_name.startswith('etrade-300'):
+    if file_name.endswith('.csv'):
+    #if file_name.startswith('etrade-3006'):
+    #if file_name.startswith('fid-dev'):
+    #if file_name.startswith('histor'):
         file_path = os.path.join(csv_directory, file_name)
         try:
             filtered_data = load_and_process_csv(file_path)
             session = get_session(engine)
-            #rows = insert_into_db(filtered_data, session)
+            rows = insert_into_db(filtered_data, session)
             print(f"Data from {file_path} inserted successfully:")
-            #print(rows)
+            print(rows)
         except ValueError as e:
             print(f"Error processing {file_path}: {e}")
