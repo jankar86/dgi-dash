@@ -27,7 +27,7 @@ def load_and_process_csv(file_path):
 
         # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
         filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)].copy()
-        print(filtered_data['transaction_date'])
+        #print(filtered_data['transaction_date'])
 
     elif 'Account' in first_row:
         # Format 2 - Etrade CSV need to read first line to get account number data.
@@ -45,7 +45,7 @@ def load_and_process_csv(file_path):
         # Convert transaction_date to a four-digit year format
         #data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%y', errors='coerce').dt.date
-        print(data['transaction_date'])
+        #print(data['transaction_date'])
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)].copy()
@@ -66,7 +66,7 @@ def load_and_process_csv(file_path):
 
         # Convert transaction_date to a four-digit year format
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
-        print(data['transaction_date'])
+        #print(data['transaction_date'])
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data
@@ -85,8 +85,15 @@ def insert_into_db(filtered_data, session):
 
     for account_number in account_numbers:
         account = Account(account_number=account_number)
-        session.merge(account)
-    session.commit()
+        try:
+            session.merge(account)
+            session.commit()
+        except IntegrityError as e:
+            session.rollback()
+            if "UNIQUE constraint failed" in str(e):
+                print(f"Account {account_number} already exists in the database. Skipping.")
+            else:
+                raise
 
     # Retrieve account IDs
     accounts = session.query(Account).all()
@@ -119,7 +126,7 @@ def insert_into_db(filtered_data, session):
         except IntegrityError as e:
             session.rollback()
             if "UNIQUE constraint failed" in str(e):
-                print(f"Skipping duplicate entry: {row.to_dict()} - This value already exists in the database.")
+                 print(f"Skipping duplicate entry: Date: {row['transaction_date']}, Symbol: {row['symbol']}, Amount: {row['amount']}")
             else:
                 raise
 

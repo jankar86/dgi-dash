@@ -1,0 +1,42 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dividend Data Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h1>Dividend Data Visualization</h1>
+    <div id="chart"></div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    const dates = data.map(item => item.transaction_date);
+                    const symbols = data.map(item => item.symbol);
+                    const amounts = data.map(item => item.amount);
+
+                    const trace = {
+                        x: dates,
+                        y: amounts,
+                        mode: 'lines+markers',
+                        type: 'scatter',
+                        text: symbols,
+                        marker: { size: 12 }
+                    };
+
+                    const layout = {
+                        title: 'Dividend Transactions Over Time',
+                        xaxis: { title: 'Date' },
+                        yaxis: { title: 'Amount' }
+                    };
+
+                    Plotly.newPlot('chart', [trace], layout);
+                });
+        });
+    </script>
+</body>
+</html>
