@@ -12,6 +12,7 @@ def load_and_process_csv(file_path):
     # Determine the format based on the first row
     if 'Action' in first_row:
         # Format 1 - Fidelity
+        print(f"Data from {file_path} identified as Format #1 Fidelity:")
         data = pd.read_csv(file_path)
 
         # Rename columns to match the table schema
@@ -23,14 +24,18 @@ def load_and_process_csv(file_path):
 
         # Ensure transaction_date is in a consistent format
         data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
+        #data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%Y', errors='coerce').dt.date
 
         # Filter rows where the transaction_type/action is "DIVIDEND RECEIVED"
         filtered_data = data[data['transaction_type'].str.contains('DIVIDEND RECEIVED', case=False, na=False)].copy()
     
     elif 'Account' in first_row:
         # Format 2 - Etrade CSV need to read first line to get account number data.
+        print(f"Data from {file_path} identified as Format #2 Etrade:")
         data = pd.read_csv(file_path, skiprows=1)
         account_number = first_row.split(',')[-1].strip()
+
+        print(f"Account Number detected: {account_number}")
 
         data.columns = [
             'transaction_date', 'transaction_type', 'security_type', 'symbol', 
@@ -38,7 +43,8 @@ def load_and_process_csv(file_path):
         ]
 
         # Convert transaction_date to a four-digit year format
-        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
+        #data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], format='%m/%d/%Y', errors='coerce').dt.date
 
         # Filter rows where the transaction_type is "Dividend"
         filtered_data = data[data['transaction_type'].str.contains('Dividend', case=False, na=False)].copy()
@@ -46,6 +52,26 @@ def load_and_process_csv(file_path):
         # Append account number to each row
         filtered_data.loc[:, 'account'] = account_number
     
+    elif 'HistoricalData' in first_row:
+        # Format 3 - Historical Data to import to database
+        print(f"Data from {file_path} identified as Format #3 Historical data import:")
+        data = pd.read_csv(file_path, skiprows=1)
+        account_number = "####1234"
+
+        data.columns = [
+            'transaction_date', 'transaction_type', 'symbol', 
+            'amount', 'description','quantity','price','commission'
+        ]
+
+        # Convert transaction_date to a four-digit year format
+        data['transaction_date'] = pd.to_datetime(data['transaction_date'], errors='coerce').dt.date
+
+        # Filter rows where the transaction_type is "Dividend"
+        filtered_data = data
+
+        # Append account number to each row
+        filtered_data.loc[:, 'account'] = account_number
+
     else:
         raise ValueError("Unknown CSV format")
 
@@ -112,7 +138,8 @@ engine = create_database(db_url)
 
 # Process each CSV file in the directory
 for file_name in os.listdir(csv_directory):
-    if file_name.endswith('.csv'):
+    #if file_name.endswith('.csv'):
+    if file_name.startswith('etrade-'):
         file_path = os.path.join(csv_directory, file_name)
         try:
             filtered_data = load_and_process_csv(file_path)
