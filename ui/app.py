@@ -35,8 +35,8 @@ def get_data():
     dividends_per_month = df.groupby(['year', 'month'])['amount'].sum().reset_index()
     dividends_per_month['month'] = dividends_per_month['month'].astype(str)
 
-    # Calculate total dividends per symbol
-    dividends_per_symbol = df.groupby('symbol')['amount'].sum().reset_index()
+    # Calculate total dividends per symbol for each year
+    dividends_per_symbol = df.groupby(['year', 'symbol'])['amount'].sum().reset_index()
 
     data = {
         'dividends_per_year': dividends_per_year.to_dict(orient='records'),

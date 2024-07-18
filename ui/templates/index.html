@@ -59,8 +59,10 @@
                     yearTableBody.addEventListener('click', function (event) {
                         const clickedYear = event.target.parentNode.dataset.year;
                         if (clickedYear) {
-                            const filteredData = data.dividends_per_month.filter(item => item.year == clickedYear);
-                            updateMonthlyChart(filteredData);
+                            const filteredMonthData = data.dividends_per_month.filter(item => item.year == clickedYear);
+                            const filteredSymbolData = data.dividends_per_symbol.filter(item => item.year == clickedYear);
+                            updateMonthlyChart(filteredMonthData);
+                            updateSymbolChart(filteredSymbolData);
                         }
                     });
 
@@ -69,15 +71,9 @@
                         const monthTrace = {
                             x: monthData.map(item => item.month),
                             y: monthData.map(item => item.amount),
-                            type: 'scatter',
-                            mode: 'lines+markers',
+                            type: 'bar',
                             text: monthData.map(item => `Month: ${item.month}<br>Amount: ${item.amount}`),
-                            hoverinfo: 'text',
-                            marker: {
-                                size: 10,
-                                color: monthData.map(item => item.amount),
-                                colorscale: 'Viridis'
-                            }
+                            hoverinfo: 'text'
                         };
                         const monthLayout = {
                             title: 'Dividends per Month',
@@ -87,19 +83,37 @@
                         Plotly.newPlot('dividends-per-month', [monthTrace], monthLayout);
                     }
 
-                    // Initial rendering of dividends per symbol pie chart
+                    // Function to update the symbol chart
+                    function updateSymbolChart(symbolData) {
+                        // Sort the data by amount and get the top 10 symbols
+                        symbolData.sort((a, b) => b.amount - a.amount);
+                        const topSymbols = symbolData.slice(0, 30);
+                        const otherSymbols = symbolData.slice(30);
+
+                        // Sum the amounts for the "Other" category
+                        const otherAmount = otherSymbols.reduce((sum, item) => sum + item.amount, 0);
+                        if (otherAmount > 0) {
+                            topSymbols.push({ symbol: 'Other', amount: otherAmount });
+                        }
+
+                        const symbolTrace = {
+                            x: topSymbols.map(item => item.symbol),
+                            y: topSymbols.map(item => item.amount),
+                            type: 'bar',
+                            text: topSymbols.map(item => item.amount.toFixed(2)),
+                            hoverinfo: 'text'
+                        };
+                        const symbolLayout = {
+                            title: 'Top Dividends per Symbol',
+                            xaxis: { title: 'Symbol' },
+                            yaxis: { title: 'Amount' }
+                        };
+                        Plotly.newPlot('dividends-per-symbol', [symbolTrace], symbolLayout);
+                    }
+
+                    // Initial rendering of dividends per symbol bar chart
                     const symbolData = data.dividends_per_symbol;
-                    const symbolTrace = {
-                        labels: symbolData.map(item => item.symbol),
-                        values: symbolData.map(item => item.amount),
-                        type: 'pie',
-                        textinfo: 'label+percent',
-                        hoverinfo: 'label+value'
-                    };
-                    const symbolLayout = {
-                        title: 'Total Dividends per Symbol'
-                    };
-                    Plotly.newPlot('dividends-per-symbol', [symbolTrace], symbolLayout);
+                    updateSymbolChart(symbolData);
                 });
         });
     </script>
