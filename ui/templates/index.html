@@ -1,0 +1,65 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dividend Data Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h1>Dividend Data Visualization</h1>
+    <div id="dividends-per-year" style="width: 100%; height: 400px;"></div>
+    <div id="dividends-per-month" style="width: 100%; height: 400px;"></div>
+    <div id="dividends-per-symbol" style="width: 100%; height: 400px;"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    // Dividends per year
+                    const yearData = data.dividends_per_year;
+                    const yearTrace = {
+                        x: yearData.map(item => item.year),
+                        y: yearData.map(item => item.amount),
+                        type: 'bar'
+                    };
+                    const yearLayout = {
+                        title: 'Dividends per Year',
+                        xaxis: { title: 'Year' },
+                        yaxis: { title: 'Amount' }
+                    };
+                    Plotly.newPlot('dividends-per-year', [yearTrace], yearLayout);
+
+                    // Dividends per month
+                    const monthData = data.dividends_per_month;
+                    const monthTrace = {
+                        x: monthData.map(item => item.month),
+                        y: monthData.map(item => item.amount),
+                        type: 'scatter',
+                        mode: 'lines+markers'
+                    };
+                    const monthLayout = {
+                        title: 'Dividends per Month',
+                        xaxis: { title: 'Month' },
+                        yaxis: { title: 'Amount' }
+                    };
+                    Plotly.newPlot('dividends-per-month', [monthTrace], monthLayout);
+
+                    // Dividends per symbol
+                    const symbolData = data.dividends_per_symbol;
+                    const symbolTrace = {
+                        labels: symbolData.map(item => item.symbol),
+                        values: symbolData.map(item => item.amount),
+                        type: 'pie'
+                    };
+                    const symbolLayout = {
+                        title: 'Total Dividends per Symbol'
+                    };
+                    Plotly.newPlot('dividends-per-symbol', [symbolTrace], symbolLayout);
+                });
+        });
+    </script>
+</body>
+</html>
