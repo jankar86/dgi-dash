@@ -23,7 +23,13 @@
                     const yearTrace = {
                         x: yearData.map(item => item.year),
                         y: yearData.map(item => item.amount),
-                        type: 'bar'
+                        type: 'bar',
+                        text: yearData.map(item => `Year: ${item.year}<br>Amount: ${item.amount}`),
+                        hoverinfo: 'text',
+                        marker: {
+                            color: yearData.map(item => item.amount),
+                            colorscale: 'Viridis'
+                        }
                     };
                     const yearLayout = {
                         title: 'Dividends per Year',
@@ -38,7 +44,14 @@
                         x: monthData.map(item => item.month),
                         y: monthData.map(item => item.amount),
                         type: 'scatter',
-                        mode: 'lines+markers'
+                        mode: 'lines+markers',
+                        text: monthData.map(item => `Month: ${item.month}<br>Amount: ${item.amount}`),
+                        hoverinfo: 'text',
+                        marker: {
+                            size: 10,
+                            color: monthData.map(item => item.amount),
+                            colorscale: 'Viridis'
+                        }
                     };
                     const monthLayout = {
                         title: 'Dividends per Month',
@@ -52,7 +65,9 @@
                     const symbolTrace = {
                         labels: symbolData.map(item => item.symbol),
                         values: symbolData.map(item => item.amount),
-                        type: 'pie'
+                        type: 'pie',
+                        textinfo: 'label+percent',
+                        hoverinfo: 'label+value'
                     };
                     const symbolLayout = {
                         title: 'Total Dividends per Symbol'
