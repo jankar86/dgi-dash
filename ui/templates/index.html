@@ -59,36 +59,50 @@
                     yearTableBody.addEventListener('click', function (event) {
                         const clickedYear = event.target.parentNode.dataset.year;
                         if (clickedYear) {
-                            const filteredMonthData = data.dividends_per_month.filter(item => item.year == clickedYear);
+                            const currentYearData = data.dividends_per_month.filter(item => item.year == clickedYear);
+                            const previousYearData = data.dividends_per_month.filter(item => item.year == (parseInt(clickedYear) - 1).toString());
+                            updateMonthlyChart(currentYearData, previousYearData);
                             const filteredSymbolData = data.dividends_per_symbol.filter(item => item.year == clickedYear);
-                            updateMonthlyChart(filteredMonthData);
                             updateSymbolChart(filteredSymbolData);
                         }
                     });
 
                     // Function to update the monthly chart
-                    function updateMonthlyChart(monthData) {
-                        const monthTrace = {
-                            x: monthData.map(item => item.month),
-                            y: monthData.map(item => item.amount),
-                            type: 'bar',
-                            text: monthData.map(item => `Month: ${item.month}<br>Amount: ${item.amount}`),
+                    function updateMonthlyChart(currentYearData, previousYearData) {
+                        const currentYearTrace = {
+                            x: currentYearData.map(item => item.month),
+                            y: currentYearData.map(item => item.amount),
+                            name: 'Current Year',
+                            mode: 'lines+markers',
+                            line: { shape: 'linear' },
+                            text: currentYearData.map(item => `Year: ${item.year}<br>Month: ${item.month}<br>Amount: ${item.amount}`),
                             hoverinfo: 'text'
                         };
+
+                        const previousYearTrace = {
+                            x: previousYearData.map(item => item.month),
+                            y: previousYearData.map(item => item.amount),
+                            name: 'Previous Year',
+                            mode: 'lines+markers',
+                            line: { shape: 'linear' },
+                            text: previousYearData.map(item => `Year: ${item.year}<br>Month: ${item.month}<br>Amount: ${item.amount}`),
+                            hoverinfo: 'text'
+                        };
+
                         const monthLayout = {
-                            title: 'Dividends per Month',
+                            title: `Dividends per Month Comparison (${currentYearData[0].year} vs ${previousYearData[0].year})`,
                             xaxis: { title: 'Month' },
                             yaxis: { title: 'Amount' }
                         };
-                        Plotly.newPlot('dividends-per-month', [monthTrace], monthLayout);
+                        Plotly.newPlot('dividends-per-month', [currentYearTrace, previousYearTrace], monthLayout);
                     }
 
                     // Function to update the symbol chart
                     function updateSymbolChart(symbolData) {
                         // Sort the data by amount and get the top 10 symbols
                         symbolData.sort((a, b) => b.amount - a.amount);
-                        const topSymbols = symbolData.slice(0, 30);
-                        const otherSymbols = symbolData.slice(30);
+                        const topSymbols = symbolData.slice(0, 10);
+                        const otherSymbols = symbolData.slice(10);
 
                         // Sum the amounts for the "Other" category
                         const otherAmount = otherSymbols.reduce((sum, item) => sum + item.amount, 0);
@@ -111,9 +125,12 @@
                         Plotly.newPlot('dividends-per-symbol', [symbolTrace], symbolLayout);
                     }
 
+                    // Initial rendering of dividends per month chart comparing current year with previous year
+                    const currentYearData = data.dividends_per_month.filter(item => item.year == data.dividends_per_year[0].year);
+                    const previousYearData = data.dividends_per_month.filter(item => item.year == (parseInt(data.dividends_per_year[0].year) - 1).toString());
+                    updateMonthlyChart(currentYearData, previousYearData);
                     // Initial rendering of dividends per symbol bar chart
-                    const symbolData = data.dividends_per_symbol;
-                    updateSymbolChart(symbolData);
+                    updateSymbolChart(data.dividends_per_symbol);
                 });
         });
     </script>
