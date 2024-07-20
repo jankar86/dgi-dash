@@ -1,4 +1,3 @@
-# app.py
 from flask import Flask, render_template, jsonify
 from sqlalchemy import create_engine
 import pandas as pd
@@ -24,9 +23,19 @@ def get_data():
     df = pd.read_sql(query, engine)
     
     # Parse the date and extract year and month
-    df['transaction_date'] = pd.to_datetime(df['transaction_date'])
+    df['transaction_date'] = pd.to_datetime(df['transaction_date'], errors='coerce')
+
+    # Debugging: Print the rows where the date parsing failed
+    nat_rows = df[df['transaction_date'].isna()]
+    if not nat_rows.empty:
+        print("Failed to parse dates for the following rows:")
+        print(nat_rows[['transaction_date']].head(10))  # Print the first 10 problematic rows
+
     df['year'] = df['transaction_date'].dt.year
     df['month'] = df['transaction_date'].dt.to_period('M')
+
+    # Filter out rows with NaT dates
+    df = df.dropna(subset=['transaction_date'])
 
     # Calculate dividends per year
     dividends_per_year = df.groupby('year')['amount'].sum().reset_index()
