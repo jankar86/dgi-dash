@@ -136,6 +136,7 @@ def insert_into_db(filtered_data, session):
     return rows
 
 # Directory containing CSV files
+#csv_directory = 'data/archived/'
 csv_directory = 'data/'
 
 # Database URL (Change this to switch between SQLite and MySQL)
