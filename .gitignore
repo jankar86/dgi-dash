@@ -1,5 +1,6 @@
 dgi_dash_env/
 *.csv
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
