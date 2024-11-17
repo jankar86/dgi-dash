@@ -5,7 +5,7 @@ set -e
 
 # Define variables
 REPO_NAME="dgi-dash"
-REGISTRY="janksr" # e.g., DockerHub, GitHub Container Registry
+REGISTRY="jankar" # e.g., DockerHub, GitHub Container Registry
 VERSION=$(date +"%Y.%m.%d.%H%M") # Use timestamp as version tag
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 COMMIT_HASH=$(git rev-parse HEAD) # Get current Git commit hash
