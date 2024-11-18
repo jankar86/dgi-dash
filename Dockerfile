@@ -18,7 +18,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 # Copy the application code
-COPY . .
+COPY *.py /app/.
+COPY ui/* /app/ui/.
 
 # Expose port and run the app
 EXPOSE 5000
