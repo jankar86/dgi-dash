@@ -1,7 +1,7 @@
 import pandas as pd
 import os
 from datetime import datetime, date
-from db import create_database, get_session, Account, Dividend
+from app.db import create_database, get_session, Account, Dividend
 from sqlalchemy.exc import IntegrityError
 
 def load_and_process_csv(file_path):
