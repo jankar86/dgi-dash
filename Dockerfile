@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y tini && apt-get clean
 
 
 # Install dependencies
-COPY requirements.txt .
+COPY /app/requirements.txt .
 RUN pip install -r requirements.txt
 
 # Copy the application code
