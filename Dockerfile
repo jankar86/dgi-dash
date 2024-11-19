@@ -1,8 +1,12 @@
 # Use an official Python runtime as a parent image
 FROM python:3.10-slim
 
-# Install tini for process management
-RUN apt-get update && apt-get install -y tini && apt-get clean
+# Install required packages including nano
+RUN apt-get update && apt-get install -y \
+    nano \
+    bash \
+    tini \
+    && apt-get clean
 
 # Set build argument for Git commit hash
 ARG COMMIT_HASH
@@ -32,3 +36,6 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 EXPOSE 8080
 #CMD ["python", "app.py"]
 CMD ["bash", "-c", "python ui/app.py & python ingest/ingestion.py"]
+
+# Set bash as the default shell
+SHELL ["/bin/bash", "-c"]
