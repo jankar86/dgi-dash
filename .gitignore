@@ -1,3 +1,8 @@
+dgi_dash_env/
+*.csv
+data/
+.last_built_commit
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

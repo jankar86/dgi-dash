@@ -1,0 +1,138 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dividend Data Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        table, th, td {
+            border: 1px solid black;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        tr:hover {background-color: #f5f5f5;}
+    </style>
+</head>
+<body>
+    <h1>Dividend Data Visualization</h1>
+    <div id="yearly-summary">
+        <h2>Yearly Summary</h2>
+        <table id="year-table">
+            <thead>
+                <tr>
+                    <th>Year</th>
+                    <th>Total Dividends</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+    </div>
+    <div id="dividends-per-month" style="width: 100%; height: 400px;"></div>
+    <div id="dividends-per-symbol" style="width: 100%; height: 400px;"></div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            fetch('/api/data')
+                .then(response => response.json())
+                .then(data => {
+                    // Populate the year table
+                    const yearTableBody = document.getElementById('year-table').getElementsByTagName('tbody')[0];
+                    data.dividends_per_year.forEach(item => {
+                        const row = yearTableBody.insertRow();
+                        row.dataset.year = item.year;
+                        const cell1 = row.insertCell(0);
+                        const cell2 = row.insertCell(1);
+                        cell1.textContent = item.year;
+                        cell2.textContent = item.amount.toFixed(2);
+                    });
+
+                    // Event listener for clicking on a year
+                    yearTableBody.addEventListener('click', function (event) {
+                        const clickedYear = event.target.parentNode.dataset.year;
+                        if (clickedYear) {
+                            const currentYearData = data.dividends_per_month.filter(item => item.year == clickedYear);
+                            const previousYearData = data.dividends_per_month.filter(item => item.year == (parseInt(clickedYear) - 1).toString());
+                            updateMonthlyChart(currentYearData, previousYearData);
+                            const filteredSymbolData = data.dividends_per_symbol.filter(item => item.year == clickedYear);
+                            updateSymbolChart(filteredSymbolData);
+                        }
+                    });
+
+                    // Function to update the monthly chart
+                    function updateMonthlyChart(currentYearData, previousYearData) {
+                        const currentYearTrace = {
+                            x: currentYearData.map(item => item.month),
+                            y: currentYearData.map(item => item.amount),
+                            name: 'Current Year',
+                            mode: 'lines+markers',
+                            line: { shape: 'linear' },
+                            text: currentYearData.map(item => `Year: ${item.year}<br>Month: ${item.month}<br>Amount: ${item.amount}`),
+                            hoverinfo: 'text'
+                        };
+
+                        const previousYearTrace = {
+                            x: previousYearData.map(item => item.month),
+                            y: previousYearData.map(item => item.amount),
+                            name: 'Previous Year',
+                            mode: 'lines+markers',
+                            line: { shape: 'linear' },
+                            text: previousYearData.map(item => `Year: ${item.year}<br>Month: ${item.month}<br>Amount: ${item.amount}`),
+                            hoverinfo: 'text'
+                        };
+
+                        const monthLayout = {
+                            title: `Dividends per Month Comparison (${currentYearData[0].year} vs ${previousYearData[0].year})`,
+                            xaxis: { title: 'Month' },
+                            yaxis: { title: 'Amount' }
+                        };
+                        Plotly.newPlot('dividends-per-month', [currentYearTrace, previousYearTrace], monthLayout);
+                    }
+
+                    // Function to update the symbol chart
+                    function updateSymbolChart(symbolData) {
+                        // Sort the data by amount and get the top 10 symbols
+                        symbolData.sort((a, b) => b.amount - a.amount);
+                        const topSymbols = symbolData.slice(0, 10);
+                        const otherSymbols = symbolData.slice(10);
+
+                        // Sum the amounts for the "Other" category
+                        const otherAmount = otherSymbols.reduce((sum, item) => sum + item.amount, 0);
+                        if (otherAmount > 0) {
+                            topSymbols.push({ symbol: 'Other', amount: otherAmount });
+                        }
+
+                        const symbolTrace = {
+                            x: topSymbols.map(item => item.symbol),
+                            y: topSymbols.map(item => item.amount),
+                            type: 'bar',
+                            text: topSymbols.map(item => item.amount.toFixed(2)),
+                            hoverinfo: 'text'
+                        };
+                        const symbolLayout = {
+                            title: 'Top Dividends per Symbol',
+                            xaxis: { title: 'Symbol' },
+                            yaxis: { title: 'Amount' }
+                        };
+                        Plotly.newPlot('dividends-per-symbol', [symbolTrace], symbolLayout);
+                    }
+
+                    // Initial rendering of dividends per month chart comparing current year with previous year
+                    const currentYearData = data.dividends_per_month.filter(item => item.year == data.dividends_per_year[0].year);
+                    const previousYearData = data.dividends_per_month.filter(item => item.year == (parseInt(data.dividends_per_year[0].year) - 1).toString());
+                    updateMonthlyChart(currentYearData, previousYearData);
+                    // Initial rendering of dividends per symbol bar chart
+                    updateSymbolChart(data.dividends_per_symbol);
+                });
+        });
+    </script>
+</body>
+</html>
