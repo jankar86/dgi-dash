@@ -1,1 +1,2 @@
 # dgi-dash
+This script processes CSV files containing dividend data in three formats, extracts relevant information, and inserts it into a database. It also handles common issues like unknown CSV formats and duplicate data.
