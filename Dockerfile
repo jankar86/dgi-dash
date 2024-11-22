@@ -24,7 +24,7 @@ COPY app/requirements.txt .
 RUN pip install -r requirements.txt
 
 # Copy the application code
-COPY app/* .
+COPY app /app
 
 # Set bash as the default shell
 SHELL ["/bin/bash", "-c"]
