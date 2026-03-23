@@ -37,8 +37,6 @@ def _build_source_row_hash(
 ):
     payload = "|".join(
         str(v) for v in (
-            source_system or "",
-            source_file or "",
             account_name or "",
             symbol or "",
             txn_type or "",
