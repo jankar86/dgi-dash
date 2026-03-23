@@ -72,19 +72,32 @@ def import_transactions(df):
 
     session.commit()
     print(f"✅ Imported: {imported_count} | ⏭️ Skipped (duplicate): {skipped_count} for account {df.iloc[0]['account']}")
+    return imported_count, skipped_count
 
 
-def process_all_etrade_files():
-    for root, _, files in os.walk(DATA_DIR):
-        for file in files:
+def process_etrade_file(filepath):
+    print(f"Processing {filepath}...")
+    account_number, df = detect_etrade_account_and_data(filepath)
+    if account_number and df is not None:
+        return import_transactions(df)
+
+    print(f"Skipped: {filepath} (not valid E*TRADE or no dividend data)")
+    return 0, 0
+
+
+def process_all_etrade_files(data_dir=DATA_DIR):
+    total_imported = 0
+    total_skipped = 0
+    for root, _, files in os.walk(data_dir):
+        for file in sorted(files):
             if file.endswith(".csv"):
                 filepath = os.path.join(root, file)
-                print(f"Processing {filepath}...")
-                account_number, df = detect_etrade_account_and_data(filepath)
-                if account_number and df is not None:
-                    import_transactions(df)
-                else:
-                    print(f"Skipped: {filepath} (not valid E*TRADE or no dividend data)")
+                imported_count, skipped_count = process_etrade_file(filepath)
+                total_imported += imported_count
+                total_skipped += skipped_count
+    return total_imported, total_skipped
 
 if __name__ == "__main__":
-    process_all_etrade_files()
+    from workflows import run_etrade_import
+
+    run_etrade_import()

@@ -73,9 +73,9 @@ def import_transactions(df):
 
     session.commit()
     print(f"✅ Imported: {imported_count} | ⏭️ Skipped (duplicate): {skipped_count}")
+    return imported_count, skipped_count
 
 if __name__ == "__main__":
-    filepath = "data/fidelity/fid-dev.csv"  # Change to match your actual file
-    df = load_fidelity_csv(filepath)
-    if df is not None:
-        import_transactions(df)
+    from workflows import run_fidelity_import
+
+    run_fidelity_import()

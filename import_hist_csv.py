@@ -45,9 +45,9 @@ def import_transactions(df):
 
     session.commit()
     print(f"✅ Imported: {imported_count} | ⏭️ Skipped (duplicate): {skipped_count}")
+    return imported_count, skipped_count
 
 if __name__ == "__main__":
-    filepath = "data/archived/historical_divs.csv"  # Update to your path
-    df = load_custom_historical(filepath)
-    if df is not None:
-        import_transactions(df)
+    from workflows import run_historical_import
+
+    run_historical_import()

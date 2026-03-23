@@ -12,10 +12,12 @@ def load_csv(filepath):
     return df
 
 def import_transactions(df):
+    imported_count = 0
+    skipped_count = 0
     for _, row in df.iterrows():
         txn_type = TxnType[row['type'].upper()]
         date = datetime.strptime(row['date'], "%Y-%m-%d").date()
-        upsert_transaction(
+        inserted = upsert_transaction(
             session,
             account_name=row['account'],
             symbol=row['symbol'],
@@ -26,10 +28,16 @@ def import_transactions(df):
             amount=row.get('amount', 0),
             is_qualified=row.get('is_qualified', False),
         )
+        if inserted:
+            imported_count += 1
+        else:
+            skipped_count += 1
 
     session.commit()
     print("Transactions imported.")
+    return imported_count, skipped_count
 
 if __name__ == "__main__":
-    df = load_csv("your_brokerage_dump.csv")  # Replace with your file path
-    import_transactions(df)
+    from workflows import run_generic_import
+
+    run_generic_import()

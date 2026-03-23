@@ -1,7 +1,6 @@
 # db_setup.py
-from sqlalchemy import create_engine
-from models import Base
+from workflows import setup_db
 
-engine = create_engine('sqlite:///dividends.db')
-Base.metadata.create_all(engine)
 
+if __name__ == "__main__":
+    setup_db()
