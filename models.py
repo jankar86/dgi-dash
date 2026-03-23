@@ -8,6 +8,7 @@ class TxnType(enum.Enum):
     BUY = "BUY"
     SELL = "SELL"
     DIVIDEND = "DIVIDEND"
+    REINVESTMENT = "REINVESTMENT"
 
 class Account(Base):
     __tablename__ = 'accounts'

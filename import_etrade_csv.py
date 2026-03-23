@@ -54,6 +54,9 @@ def _parse_etrade_legacy(lines, filepath):
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
     df["account"] = _format_account_label(account_number)
     df["type"] = "DIVIDEND"
+    if "description" in df.columns:
+        reinvest_mask = df["description"].astype(str).str.upper().str.contains("REINVEST", na=False)
+        df.loc[reinvest_mask, "type"] = "REINVESTMENT"
     return account_number, df
 
 
@@ -102,6 +105,9 @@ def _parse_etrade_new(lines, filepath):
     ).fillna(0)
     df["account"] = _format_account_label(account_number)
     df["type"] = "DIVIDEND"
+    if "description" in df.columns:
+        reinvest_mask = df["description"].astype(str).str.upper().str.contains("REINVEST", na=False)
+        df.loc[reinvest_mask, "type"] = "REINVESTMENT"
     return account_number, df
 
 
@@ -125,7 +131,7 @@ def import_transactions(df):
             session,
             account_name=row['account'],
             symbol=row['symbol'],
-            txn_type=TxnType.DIVIDEND,
+            txn_type=TxnType[row['type']],
             date=row['date'],
             quantity=row['quantity'],
             price=row['price'],

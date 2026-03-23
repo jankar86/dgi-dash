@@ -77,6 +77,7 @@ def load_fidelity_csv(filepath):
         df['account'] = _infer_account_from_filename(filepath)
 
     df['type'] = 'DIVIDEND'
+    df.loc[df['action'].str.contains('REINVESTMENT', na=False), 'type'] = 'REINVESTMENT'
 
     return df
 
@@ -89,7 +90,7 @@ def import_transactions(df):
             session,
             account_name=row['account'],
             symbol=row['symbol'],
-            txn_type=TxnType.DIVIDEND,
+            txn_type=TxnType[row['type']],
             date=row['date'],
             quantity=row['quantity'],
             price=row['price'],
