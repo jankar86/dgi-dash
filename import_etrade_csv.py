@@ -1,4 +1,5 @@
 import os
+import re
 import pandas as pd
 from models import TxnType
 from import_utils import create_session, upsert_transaction
@@ -7,46 +8,112 @@ session = create_session()
 
 DATA_DIR = "data/etrade"
 
-def detect_etrade_account_and_data(filepath):
-    with open(filepath, 'r') as f:
-        lines = f.readlines()
+def _format_account_label(account_number):
+    cleaned = str(account_number).strip()
+    digits = "".join(ch for ch in cleaned if ch.isdigit())
+    if digits and len(digits) == 4:
+        return f"ETRADE-#####{digits}"
+    if digits:
+        return f"ETRADE-{digits}"
+    return f"ETRADE-{cleaned}"
 
+
+def _parse_etrade_legacy(lines, filepath):
     account_line = next((line for line in lines if line.startswith("For Account:")), None)
     if not account_line:
         return None, None
 
-    # Extract account number
     try:
         account_number = account_line.split(",")[1].strip()
     except IndexError:
         return None, None
 
-    # Find where CSV header starts
-    csv_start_index = next((i for i, line in enumerate(lines) if line.strip().startswith("TransactionDate")), None)
+    csv_start_index = next(
+        (i for i, line in enumerate(lines) if line.strip().startswith("TransactionDate")),
+        None,
+    )
     if csv_start_index is None:
         return None, None
 
     df = pd.read_csv(filepath, skiprows=csv_start_index)
     df.columns = [c.strip().lower() for c in df.columns]
+    if "transactiontype" not in df.columns:
+        return None, None
 
-    # Filter for dividends
-    df['transactiontype'] = df['transactiontype'].str.upper().str.strip()
-    df = df[df['transactiontype'].isin(['DIVIDEND', 'QUALIFIED DIVIDEND'])]
-    df['is_qualified'] = df['transactiontype'] == 'QUALIFIED DIVIDEND'
+    df["transactiontype"] = df["transactiontype"].astype(str).str.upper().str.strip()
+    df = df[df["transactiontype"].isin(["DIVIDEND", "QUALIFIED DIVIDEND"])]
+    df["is_qualified"] = df["transactiontype"] == "QUALIFIED DIVIDEND"
 
     if df.empty:
         return account_number, None
 
-    # Clean columns
-    df['date'] = pd.to_datetime(df['transactiondate'], format='%m/%d/%y')
-    df['symbol'] = df['symbol'].str.strip().fillna('UNKNOWN')
-    df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
-    df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
-    df['account'] = f"ETRADE-{account_number}"
-    df['type'] = 'DIVIDEND'
-
+    df["date"] = pd.to_datetime(df["transactiondate"], format="%m/%d/%y", errors="coerce")
+    df["symbol"] = df["symbol"].fillna("UNKNOWN").astype(str).str.strip()
+    df["amount"] = pd.to_numeric(df["amount"], errors="coerce").fillna(0)
+    df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce").fillna(0)
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
+    df["account"] = _format_account_label(account_number)
+    df["type"] = "DIVIDEND"
     return account_number, df
+
+
+def _parse_etrade_new(lines, filepath):
+    header_idx = next(
+        (i for i, line in enumerate(lines) if line.strip().startswith("Activity/Trade Date")),
+        None,
+    )
+    if header_idx is None:
+        return None, None
+
+    account_line = next((line for line in lines if "Account Activity for" in line), "")
+    match = re.search(r"Index\s*-\s*(\d+)", account_line)
+    if not match:
+        match = re.search(r"Account Activity for .*?-\s*(\d+)\s+from", account_line)
+    if not match:
+        return None, None
+    account_number = match.group(1)
+
+    df = pd.read_csv(filepath, skiprows=header_idx)
+    df.columns = [c.replace("\ufeff", "").strip().lower() for c in df.columns]
+    if "activity type" not in df.columns:
+        return None, None
+
+    df["activity type"] = df["activity type"].astype(str).str.upper().str.strip()
+    df = df[df["activity type"].isin(["DIVIDEND", "QUALIFIED DIVIDEND"])]
+    df["is_qualified"] = df["activity type"] == "QUALIFIED DIVIDEND"
+
+    if df.empty:
+        return account_number, None
+
+    date_col = "transaction date" if "transaction date" in df.columns else "activity/trade date"
+    df["date"] = pd.to_datetime(df[date_col], format="%m/%d/%y", errors="coerce")
+    df["symbol"] = df["symbol"].fillna("UNKNOWN").astype(str).str.strip()
+    df["amount"] = pd.to_numeric(
+        df["amount $"].astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    ).fillna(0)
+    df["quantity"] = pd.to_numeric(
+        df.get("quantity #", 0).astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    ).fillna(0)
+    df["price"] = pd.to_numeric(
+        df.get("price $", 0).astype(str).str.replace(",", "", regex=False).str.strip(),
+        errors="coerce",
+    ).fillna(0)
+    df["account"] = _format_account_label(account_number)
+    df["type"] = "DIVIDEND"
+    return account_number, df
+
+
+def detect_etrade_account_and_data(filepath):
+    with open(filepath, "r", encoding="utf-8-sig") as f:
+        lines = f.readlines()
+
+    account_number, df = _parse_etrade_legacy(lines, filepath)
+    if account_number is not None:
+        return account_number, df
+
+    return _parse_etrade_new(lines, filepath)
 
 
 def import_transactions(df):

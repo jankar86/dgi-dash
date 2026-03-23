@@ -1,21 +1,48 @@
 # import_fidelity_csv.py
 
+import os
+import re
 import pandas as pd
-from models import TxnType
+from models import Account, TxnType
 from import_utils import create_session, upsert_transaction
 
 session = create_session()
 
 def is_fidelity_format(df):
-    expected = ['run date', 'account', 'action', 'symbol', 'description', 'type', 
-                'quantity', 'price ($)', 'commission ($)', 'fees ($)', 
-                'accrued interest ($)', 'amount ($)', 'settlement date']
-    return all(col.lower().strip() in df.columns for col in expected)
+    cols = set(df.columns)
+    old_expected = {
+        "run date", "account", "action", "symbol", "description", "type",
+        "quantity", "price ($)", "commission ($)", "fees ($)",
+        "accrued interest ($)", "amount ($)", "settlement date",
+    }
+    new_expected = {
+        "run date", "action", "symbol", "description", "type", "price ($)",
+        "quantity", "commission ($)", "fees ($)", "accrued interest ($)",
+        "amount ($)", "cash balance ($)", "settlement date",
+    }
+    return old_expected.issubset(cols) or new_expected.issubset(cols)
+
+
+def _infer_account_from_filename(filepath):
+    filename = os.path.basename(filepath)
+    match = re.search(r"(\d{4,})-fidelity", filename.lower())
+    if not match:
+        return "FIDELITY-UNKNOWN"
+
+    suffix = match.group(1)
+    candidates = (
+        session.query(Account)
+        .filter(Account.name.like(f"FIDELITY-%{suffix}"))
+        .all()
+    )
+    if len(candidates) == 1:
+        return candidates[0].name
+    return f"FIDELITY-{suffix}"
 
 def load_fidelity_csv(filepath):
     # Force UTF-8 decoding and ensure header is properly read
-    df = pd.read_csv(filepath, dtype=str, encoding='utf-8', skip_blank_lines=True)
-    df.columns = [c.strip().lower() for c in df.columns]
+    df = pd.read_csv(filepath, dtype=str, encoding='utf-8-sig', skip_blank_lines=True)
+    df.columns = [c.replace("\ufeff", "").strip().lower() for c in df.columns]
 
     if not is_fidelity_format(df):
         print(f"❌ Skipped: {filepath} (not recognized as Fidelity format)")
@@ -43,8 +70,11 @@ def load_fidelity_csv(filepath):
     df['symbol'] = df['symbol'].str.strip().fillna('UNKNOWN')
     df['is_qualified'] = False  # Default for now
 
-    # Extract account number from string (e.g., "ROTH IRA 224294217")
-    df['account'] = 'FIDELITY-' + df['account'].str.extract(r'(\d+)', expand=False).fillna('UNKNOWN')
+    # Old format has explicit account column; new format requires filename inference.
+    if "account" in df.columns:
+        df['account'] = 'FIDELITY-' + df['account'].str.extract(r'(\d+)', expand=False).fillna('UNKNOWN')
+    else:
+        df['account'] = _infer_account_from_filename(filepath)
 
     df['type'] = 'DIVIDEND'
 
