@@ -1,0 +1,30 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## [Unreleased]
+- Documentation updates and upcoming ingestion automation work.
+
+## [2026-03-23]
+### Added
+- Unified CLI entrypoint in `cli.py` for setup/import/report commands.
+- Coverage and month-gap reporting commands.
+- Shared import utility module for centralized upsert logic.
+- SQL backup workflow for SQLite dump snapshots.
+
+### Changed
+- Import workflows refactored behind `workflows.py`.
+- Schema hardening for transaction precision and provenance fields.
+- Row hash calculation updated to exclude source metadata (`source_system`, `source_file`).
+- Transaction normalization for reinvestment handling (`REINVESTMENT`).
+- Historical account handling updated to `UNALLOCATED-LEGACY` with allocation status tagging.
+- Broker importers updated for backward-compatible old/new CSV export formats.
+
+### Fixed
+- Account alias merge behavior for certain Fidelity account variants.
+- Multiple dedupe/import robustness issues across source importers.
+
+### Security
+- Stopped tracking raw CSV data and SQLite DB artifacts in git.
+- Added ignore rules for `data/**/*.csv`, `dividends.db`, and `backups/*.sql`.
+- Repository history cleaned to remove previously tracked data artifacts.
