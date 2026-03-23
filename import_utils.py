@@ -46,6 +46,7 @@ def upsert_transaction(
     price,
     amount,
     is_qualified=False,
+    allocation_status="ALLOCATED",
 ):
     account = _get_or_create_account(session, account_name)
     security = _get_or_create_security(session, symbol)
@@ -73,6 +74,7 @@ def upsert_transaction(
             price=price,
             amount=amount,
             is_qualified=is_qualified,
+            allocation_status=allocation_status,
         )
     )
     return True

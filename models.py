@@ -36,6 +36,7 @@ class Transaction(Base):
     price = Column(Float)
     amount = Column(Float)
     is_qualified = Column(Boolean, default=False)  # ✅ New field
+    allocation_status = Column(String, default="ALLOCATED")
 
     account = relationship("Account", back_populates="transactions")
     security = relationship("Security", back_populates="transactions")
@@ -43,4 +44,3 @@ class Transaction(Base):
     __table_args__ = (
         UniqueConstraint('account_id', 'security_id', 'txn_type', 'date', 'amount', name='uix_txn_unique'),
     )
-

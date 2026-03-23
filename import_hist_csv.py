@@ -18,7 +18,8 @@ def load_custom_historical(filepath):
     df['price'] = pd.to_numeric(df.get('price', 0), errors='coerce').fillna(0)
     df['symbol'] = df['symbol'].str.strip().fillna('UNKNOWN')
     df['is_qualified'] = False
-    df['account'] = 'Historical'
+    df['account'] = 'UNALLOCATED-LEGACY'
+    df['allocation_status'] = 'UNALLOCATED'
 
     return df
 
@@ -37,6 +38,7 @@ def import_transactions(df):
             price=row['price'],
             amount=row['amount'],
             is_qualified=row['is_qualified'],
+            allocation_status=row.get('allocation_status', 'UNALLOCATED'),
         )
         if inserted:
             imported_count += 1

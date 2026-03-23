@@ -1,6 +1,6 @@
 import os
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 
 from models import Base
 import import_csv
@@ -26,7 +26,53 @@ def _log_event(event, **fields):
 def setup_db(db_url="sqlite:///dividends.db"):
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
+    _run_post_create_migrations(engine)
     _log_event("db_setup_complete", db_url=db_url)
+
+
+def _run_post_create_migrations(engine):
+    inspector = inspect(engine)
+    if "transactions" not in inspector.get_table_names():
+        return
+
+    tx_columns = {col["name"] for col in inspector.get_columns("transactions")}
+
+    with engine.begin() as conn:
+        if "allocation_status" not in tx_columns:
+            conn.execute(
+                text(
+                    "ALTER TABLE transactions "
+                    "ADD COLUMN allocation_status VARCHAR DEFAULT 'ALLOCATED'"
+                )
+            )
+
+        # Keep legacy historical data, but make intent explicit.
+        old_account_id = conn.execute(
+            text("SELECT id FROM accounts WHERE name = 'Historical' LIMIT 1")
+        ).scalar()
+        new_account_id = conn.execute(
+            text("SELECT id FROM accounts WHERE name = 'UNALLOCATED-LEGACY' LIMIT 1")
+        ).scalar()
+
+        if old_account_id and not new_account_id:
+            conn.execute(
+                text(
+                    "UPDATE accounts SET name = 'UNALLOCATED-LEGACY' "
+                    "WHERE id = :old_id"
+                ),
+                {"old_id": old_account_id},
+            )
+
+        # Historical/unallocated rows should be marked explicitly.
+        conn.execute(
+            text(
+                "UPDATE transactions "
+                "SET allocation_status = 'UNALLOCATED' "
+                "WHERE account_id IN ("
+                "  SELECT id FROM accounts WHERE name IN ('UNALLOCATED-LEGACY', 'Historical')"
+                ")"
+            )
+        )
 
 
 def run_generic_import(filepath=DEFAULT_GENERIC_PATH):

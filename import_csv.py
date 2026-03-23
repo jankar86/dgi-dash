@@ -27,6 +27,7 @@ def import_transactions(df):
             price=row.get('price', 0),
             amount=row.get('amount', 0),
             is_qualified=row.get('is_qualified', False),
+            allocation_status=row.get('allocation_status', 'ALLOCATED'),
         )
         if inserted:
             imported_count += 1
