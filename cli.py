@@ -1,5 +1,6 @@
 import argparse
 
+import coverage_report
 import workflows
 
 
@@ -8,6 +9,13 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("setup-db", help="Initialize database schema")
+    coverage_parser = subparsers.add_parser(
+        "report-coverage", help="Show latest transaction coverage by account"
+    )
+    coverage_parser.add_argument(
+        "--as-of",
+        help="Reference date in YYYY-MM-DD format (default: today)",
+    )
 
     import_parser = subparsers.add_parser("import", help="Run an import workflow")
     import_parser.add_argument(
@@ -41,6 +49,10 @@ def main(argv=None):
             workflows.run_historical_import(args.path or workflows.DEFAULT_HISTORICAL_PATH)
         elif args.source == "etrade":
             workflows.run_etrade_import(args.path or workflows.DEFAULT_ETRADE_PATH)
+        return 0
+
+    if args.command == "report-coverage":
+        coverage_report.print_account_coverage(as_of=args.as_of)
         return 0
 
     parser.print_help()
