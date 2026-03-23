@@ -1,13 +1,10 @@
 # import_csv.py
 import pandas as pd
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from models import Account, Security, Transaction, TxnType
+from models import TxnType
 from datetime import datetime
+from import_utils import create_session, upsert_transaction
 
-engine = create_engine('sqlite:///dividends.db')
-Session = sessionmaker(bind=engine)
-session = Session()
+session = create_session()
 
 def load_csv(filepath):
     df = pd.read_csv(filepath)
@@ -16,37 +13,19 @@ def load_csv(filepath):
 
 def import_transactions(df):
     for _, row in df.iterrows():
-        account_name = row['account']
-        symbol = row['symbol']
         txn_type = TxnType[row['type'].upper()]
         date = datetime.strptime(row['date'], "%Y-%m-%d").date()
-
-        acct = session.query(Account).filter_by(name=account_name).first()
-        if not acct:
-            acct = Account(name=account_name)
-            session.add(acct)
-
-        sec = session.query(Security).filter_by(ticker=symbol).first()
-        if not sec:
-            sec = Security(ticker=symbol)
-            session.add(sec)
-
-        exists = session.query(Transaction).filter_by(
-            account=acct, security=sec, txn_type=txn_type,
-            date=date, amount=row.get('amount', 0)
-        ).first()
-
-        if not exists:
-            txn = Transaction(
-                account=acct,
-                security=sec,
-                txn_type=txn_type,
-                date=date,
-                quantity=row.get('quantity', 0),
-                price=row.get('price', 0),
-                amount=row.get('amount', 0),
-            )
-            session.add(txn)
+        upsert_transaction(
+            session,
+            account_name=row['account'],
+            symbol=row['symbol'],
+            txn_type=txn_type,
+            date=date,
+            quantity=row.get('quantity', 0),
+            price=row.get('price', 0),
+            amount=row.get('amount', 0),
+            is_qualified=row.get('is_qualified', False),
+        )
 
     session.commit()
     print("Transactions imported.")

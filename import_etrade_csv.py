@@ -1,13 +1,9 @@
 import os
 import pandas as pd
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from models import Account, Security, Transaction, TxnType
-from datetime import datetime
+from models import TxnType
+from import_utils import create_session, upsert_transaction
 
-engine = create_engine('sqlite:///dividends.db')
-Session = sessionmaker(bind=engine)
-session = Session()
+session = create_session()
 
 DATA_DIR = "data/etrade"
 
@@ -58,38 +54,18 @@ def import_transactions(df):
     skipped_count = 0
 
     for _, row in df.iterrows():
-        acct = session.query(Account).filter_by(name=row['account']).first()
-        if not acct:
-            acct = Account(name=row['account'])
-            session.add(acct)
-
-        sec = session.query(Security).filter_by(ticker=row['symbol']).first()
-        if not sec:
-            sec = Security(ticker=row['symbol'])
-            session.add(sec)
-
-        session.flush()  # Make sure IDs are assigned for relationship checking
-
-        exists = session.query(Transaction).filter_by(
-            account_id=acct.id,
-            security_id=sec.id,
+        inserted = upsert_transaction(
+            session,
+            account_name=row['account'],
+            symbol=row['symbol'],
             txn_type=TxnType.DIVIDEND,
             date=row['date'],
-            amount=row['amount']
-        ).first()
-
-        if not exists:
-            txn = Transaction(
-                account=acct,
-                security=sec,
-                txn_type=TxnType.DIVIDEND,
-                date=row['date'],
-                quantity=row['quantity'],
-                price=row['price'],
-                amount=row['amount'],
-                is_qualified=row['is_qualified'],
-            )
-            session.add(txn)
+            quantity=row['quantity'],
+            price=row['price'],
+            amount=row['amount'],
+            is_qualified=row['is_qualified'],
+        )
+        if inserted:
             imported_count += 1
         else:
             skipped_count += 1
