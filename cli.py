@@ -16,6 +16,13 @@ def build_parser():
         "--as-of",
         help="Reference date in YYYY-MM-DD format (default: today)",
     )
+    gaps_parser = subparsers.add_parser(
+        "report-gaps", help="Show month-level data gaps by account"
+    )
+    gaps_parser.add_argument(
+        "--as-of",
+        help="Reference date in YYYY-MM-DD format (default: today)",
+    )
 
     import_parser = subparsers.add_parser("import", help="Run an import workflow")
     import_parser.add_argument(
@@ -53,6 +60,10 @@ def main(argv=None):
 
     if args.command == "report-coverage":
         coverage_report.print_account_coverage(as_of=args.as_of)
+        return 0
+
+    if args.command == "report-gaps":
+        coverage_report.print_monthly_gap_analysis(as_of=args.as_of)
         return 0
 
     parser.print_help()
