@@ -1,4 +1,18 @@
-from sqlalchemy import Column, Integer, Float, String, Date, ForeignKey, Enum, UniqueConstraint, Boolean
+from datetime import datetime
+
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Date,
+    DateTime,
+    ForeignKey,
+    Enum,
+    UniqueConstraint,
+    Boolean,
+    Numeric,
+    Index,
+)
 from sqlalchemy.orm import declarative_base, relationship
 import enum
 
@@ -31,17 +45,26 @@ class Transaction(Base):
 
     account_id = Column(Integer, ForeignKey('accounts.id'))
     security_id = Column(Integer, ForeignKey('securities.id'))
-    txn_type = Column(Enum(TxnType))
-    date = Column(Date)
-    quantity = Column(Float)
-    price = Column(Float)
-    amount = Column(Float)
-    is_qualified = Column(Boolean, default=False)  # ✅ New field
-    allocation_status = Column(String, default="ALLOCATED")
+    txn_type = Column(Enum(TxnType, native_enum=False, length=20), nullable=False)
+    date = Column(Date, nullable=False)
+    quantity = Column(Numeric(20, 6), nullable=False, default=0)
+    price = Column(Numeric(20, 6), nullable=False, default=0)
+    amount = Column(Numeric(20, 2), nullable=False, default=0)
+    is_qualified = Column(Boolean, nullable=False, default=False)
+    allocation_status = Column(String(32), nullable=False, default="ALLOCATED")
+    source_system = Column(String(32))
+    source_file = Column(String(255))
+    source_row_hash = Column(String(64), unique=True)
+    raw_action = Column(String(128))
+    imported_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     account = relationship("Account", back_populates="transactions")
     security = relationship("Security", back_populates="transactions")
 
     __table_args__ = (
         UniqueConstraint('account_id', 'security_id', 'txn_type', 'date', 'amount', name='uix_txn_unique'),
+        Index('idx_transactions_date', 'date'),
+        Index('idx_transactions_account_date', 'account_id', 'date'),
+        Index('idx_transactions_security_date', 'security_id', 'date'),
+        Index('idx_transactions_type_date', 'txn_type', 'date'),
     )

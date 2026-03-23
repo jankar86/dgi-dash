@@ -78,6 +78,9 @@ def load_fidelity_csv(filepath):
 
     df['type'] = 'DIVIDEND'
     df.loc[df['action'].str.contains('REINVESTMENT', na=False), 'type'] = 'REINVESTMENT'
+    df['source_system'] = 'fidelity_csv'
+    df['source_file'] = filepath
+    df['raw_action'] = df['action']
 
     return df
 
@@ -90,12 +93,16 @@ def import_transactions(df):
             session,
             account_name=row['account'],
             symbol=row['symbol'],
-            txn_type=TxnType[row['type']],
+            txn_type=TxnType[str(row['type']).upper()],
             date=row['date'],
             quantity=row['quantity'],
             price=row['price'],
             amount=row['amount'],
             is_qualified=row['is_qualified'],
+            allocation_status='ALLOCATED',
+            source_system=row.get('source_system'),
+            source_file=row.get('source_file'),
+            raw_action=row.get('raw_action'),
         )
         if inserted:
             imported_count += 1

@@ -9,6 +9,10 @@ session = create_session()
 def load_csv(filepath):
     df = pd.read_csv(filepath)
     df.columns = [col.strip().lower() for col in df.columns]
+    df["source_system"] = "generic_csv"
+    df["source_file"] = filepath
+    if "raw_action" not in df.columns:
+        df["raw_action"] = ""
     return df
 
 def import_transactions(df):
@@ -28,6 +32,9 @@ def import_transactions(df):
             amount=row.get('amount', 0),
             is_qualified=row.get('is_qualified', False),
             allocation_status=row.get('allocation_status', 'ALLOCATED'),
+            source_system=row.get('source_system'),
+            source_file=row.get('source_file'),
+            raw_action=row.get('raw_action'),
         )
         if inserted:
             imported_count += 1

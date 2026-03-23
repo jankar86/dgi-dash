@@ -20,6 +20,9 @@ def load_custom_historical(filepath):
     df['is_qualified'] = False
     df['account'] = 'UNALLOCATED-LEGACY'
     df['allocation_status'] = 'UNALLOCATED'
+    df['source_system'] = 'historical_csv'
+    df['source_file'] = filepath
+    df['raw_action'] = df.get('transaction_type', '')
 
     return df
 
@@ -39,6 +42,9 @@ def import_transactions(df):
             amount=row['amount'],
             is_qualified=row['is_qualified'],
             allocation_status=row.get('allocation_status', 'UNALLOCATED'),
+            source_system=row.get('source_system'),
+            source_file=row.get('source_file'),
+            raw_action=row.get('raw_action'),
         )
         if inserted:
             imported_count += 1

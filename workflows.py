@@ -1,4 +1,5 @@
 import os
+import re
 
 from sqlalchemy import create_engine, inspect, text
 
@@ -35,20 +36,10 @@ def _run_post_create_migrations(engine):
     if "transactions" not in inspector.get_table_names():
         return
 
-    _ensure_transactions_support_reinvestment(engine)
-
-    inspector = inspect(engine)
-    tx_columns = {col["name"] for col in inspector.get_columns("transactions")}
+    _ensure_transactions_schema(engine)
+    _ensure_transaction_indexes(engine)
 
     with engine.begin() as conn:
-        if "allocation_status" not in tx_columns:
-            conn.execute(
-                text(
-                    "ALTER TABLE transactions "
-                    "ADD COLUMN allocation_status VARCHAR DEFAULT 'ALLOCATED'"
-                )
-            )
-
         # Keep legacy historical data, but make intent explicit.
         old_account_id = conn.execute(
             text("SELECT id FROM accounts WHERE name = 'Historical' LIMIT 1")
@@ -83,9 +74,10 @@ def _run_post_create_migrations(engine):
                 "WHERE txn_type = 'DIVIDEND' AND amount < 0"
             )
         )
+        _merge_fidelity_alias_accounts(conn)
 
 
-def _ensure_transactions_support_reinvestment(engine):
+def _ensure_transactions_schema(engine):
     with engine.begin() as conn:
         create_sql = conn.execute(
             text(
@@ -94,24 +86,49 @@ def _ensure_transactions_support_reinvestment(engine):
             )
         ).scalar() or ""
 
-        if "REINVESTMENT" in create_sql or "CHECK" not in create_sql:
+        required_tokens = (
+            "allocation_status",
+            "source_system",
+            "source_file",
+            "source_row_hash",
+            "raw_action",
+            "imported_at",
+        )
+        needs_rebuild = any(token not in create_sql for token in required_tokens)
+        needs_rebuild = needs_rebuild or "txn_type VARCHAR(20)" not in create_sql
+        needs_rebuild = needs_rebuild or "NUMERIC(20, 2)" not in create_sql
+        needs_rebuild = needs_rebuild or "NUMERIC(20, 6)" not in create_sql
+        if not needs_rebuild:
             return
 
+        existing_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(transactions)")).fetchall()
+        }
+
+        def src_col(name, default_sql):
+            return name if name in existing_cols else default_sql
+
         conn.execute(text("PRAGMA foreign_keys=OFF"))
+        conn.execute(text("DROP TABLE IF EXISTS transactions_new"))
         conn.execute(
             text(
                 """
                 CREATE TABLE transactions_new (
                     id INTEGER PRIMARY KEY,
-                    account_id INTEGER,
-                    security_id INTEGER,
-                    txn_type VARCHAR(20),
-                    date DATE,
-                    quantity FLOAT,
-                    price FLOAT,
-                    amount FLOAT,
-                    is_qualified BOOLEAN,
-                    allocation_status VARCHAR DEFAULT 'ALLOCATED',
+                    account_id INTEGER NOT NULL,
+                    security_id INTEGER NOT NULL,
+                    txn_type VARCHAR(20) NOT NULL,
+                    date DATE NOT NULL,
+                    quantity NUMERIC(20, 6) NOT NULL DEFAULT 0,
+                    price NUMERIC(20, 6) NOT NULL DEFAULT 0,
+                    amount NUMERIC(20, 2) NOT NULL DEFAULT 0,
+                    is_qualified BOOLEAN NOT NULL DEFAULT 0,
+                    allocation_status VARCHAR(32) NOT NULL DEFAULT 'ALLOCATED',
+                    source_system VARCHAR(32),
+                    source_file VARCHAR(255),
+                    source_row_hash VARCHAR(64) UNIQUE,
+                    raw_action VARCHAR(128),
+                    imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(account_id) REFERENCES accounts(id),
                     FOREIGN KEY(security_id) REFERENCES securities(id),
                     CONSTRAINT uix_txn_unique UNIQUE(account_id, security_id, txn_type, date, amount)
@@ -119,29 +136,111 @@ def _ensure_transactions_support_reinvestment(engine):
                 """
             )
         )
-        conn.execute(
-            text(
-                """
-                INSERT INTO transactions_new
-                    (id, account_id, security_id, txn_type, date, quantity, price, amount, is_qualified, allocation_status)
-                SELECT
-                    id,
-                    account_id,
-                    security_id,
-                    txn_type,
-                    date,
-                    quantity,
-                    price,
-                    amount,
-                    is_qualified,
-                    COALESCE(allocation_status, 'ALLOCATED')
-                FROM transactions
-                """
-            )
-        )
+        insert_sql = f"""
+            INSERT INTO transactions_new
+                (
+                    id, account_id, security_id, txn_type, date,
+                    quantity, price, amount, is_qualified, allocation_status,
+                    source_system, source_file, source_row_hash, raw_action, imported_at
+                )
+            SELECT
+                id,
+                account_id,
+                security_id,
+                COALESCE({src_col('txn_type', "'DIVIDEND'")}, 'DIVIDEND'),
+                {src_col('date', 'CURRENT_DATE')},
+                COALESCE({src_col('quantity', '0')}, 0),
+                COALESCE({src_col('price', '0')}, 0),
+                COALESCE({src_col('amount', '0')}, 0),
+                COALESCE({src_col('is_qualified', '0')}, 0),
+                COALESCE({src_col('allocation_status', "'ALLOCATED'")}, 'ALLOCATED'),
+                {src_col('source_system', 'NULL')},
+                {src_col('source_file', 'NULL')},
+                {src_col('source_row_hash', 'NULL')},
+                {src_col('raw_action', 'NULL')},
+                COALESCE({src_col('imported_at', 'CURRENT_TIMESTAMP')}, CURRENT_TIMESTAMP)
+            FROM transactions
+        """
+        conn.execute(text(insert_sql))
         conn.execute(text("DROP TABLE transactions"))
         conn.execute(text("ALTER TABLE transactions_new RENAME TO transactions"))
         conn.execute(text("PRAGMA foreign_keys=ON"))
+
+
+def _ensure_transaction_indexes(engine):
+    with engine.begin() as conn:
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date)"))
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_account_date "
+                "ON transactions(account_id, date)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_security_date "
+                "ON transactions(security_id, date)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS idx_transactions_type_date "
+                "ON transactions(txn_type, date)"
+            )
+        )
+
+
+def _merge_fidelity_alias_accounts(conn):
+    rows = conn.execute(
+        text("SELECT id, name FROM accounts WHERE name LIKE 'FIDELITY-%'")
+    ).fetchall()
+    if not rows:
+        return
+
+    full_by_suffix = {}
+    alias_rows = []
+    for row in rows:
+        acct_id, name = row
+        m = re.match(r"^FIDELITY-(\d+)$", name or "")
+        if not m:
+            continue
+        digits = m.group(1)
+        if len(digits) >= 5:
+            full_by_suffix.setdefault(digits[-4:], []).append((acct_id, name))
+        elif len(digits) == 4:
+            alias_rows.append((acct_id, name, digits))
+
+    for old_id, _old_name, suffix in alias_rows:
+        candidates = full_by_suffix.get(suffix, [])
+        if len(candidates) != 1:
+            continue
+
+        target_id = candidates[0][0]
+        conn.execute(
+            text(
+                """
+                DELETE FROM transactions
+                WHERE account_id = :old_id
+                  AND EXISTS (
+                    SELECT 1 FROM transactions t2
+                    WHERE t2.account_id = :target_id
+                      AND t2.security_id = transactions.security_id
+                      AND t2.txn_type = transactions.txn_type
+                      AND t2.date = transactions.date
+                      AND t2.amount = transactions.amount
+                  )
+                """
+            ),
+            {"target_id": target_id, "old_id": old_id},
+        )
+        conn.execute(
+            text("UPDATE transactions SET account_id = :target_id WHERE account_id = :old_id"),
+            {"target_id": target_id, "old_id": old_id},
+        )
+        conn.execute(
+            text("DELETE FROM accounts WHERE id = :old_id"),
+            {"old_id": old_id},
+        )
 
 
 def run_generic_import(filepath=DEFAULT_GENERIC_PATH):
