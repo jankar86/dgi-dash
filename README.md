@@ -9,17 +9,27 @@ CSV-to-SQLite ingestion utilities for dividend transaction tracking.
 - Provides coverage and month-gap reporting for data quality checks
 
 ## Project layout
-- `cli.py`: single entrypoint for setup, import, and reports
-- `workflows.py`: orchestration and migration helpers
-- `models.py`: SQLAlchemy models
-- `import_utils.py`: shared import/upsert utilities
-- `import_csv.py`: generic CSV importer
-- `import_etrade_csv.py`: E*TRADE importer
-- `import_fidelity_csv.py`: Fidelity importer
-- `import_hist_csv.py`: historical importer
-- `coverage_report.py`: coverage and gap analysis reports
+- `cli.py`: single entrypoint for setup, import, reports, and the web UI
+- `db/`: database models and shared DB/session utilities
+- `ingest/`: importers plus ingestion/archive workflows
+- `reporting/`: coverage and reconciliation/reporting logic
+- `webapp/`: read-only dashboard UI and query layer
+- top-level `models.py`, `workflows.py`, `import_*.py`, and report modules: compatibility wrappers for legacy commands
 - `data/`: local CSV input folders (ignored by git)
 - `backups/`: SQL dump snapshots (ignored by git)
+
+## Structure guide
+- `db/models.py`: SQLAlchemy schema and enums
+- `db/utils.py`: session creation, validation guards, and transaction upsert logic
+- `ingest/generic.py`: generic CSV importer
+- `ingest/fidelity.py`: Fidelity-specific parsing/import logic
+- `ingest/etrade.py`: E*TRADE-specific parsing/import logic
+- `ingest/historical.py`: archived historical import logic
+- `ingest/workflows.py`: `setup-db`, `import-current`, `import-all`, and archive orchestration
+- `reporting/coverage.py`: coverage and gap analysis
+- `reporting/manual_compare.py`: manual-ledger reconciliation and manual-interest import
+- `webapp/dashboard_data.py`: read/query layer for the dashboard
+- `webapp/dashboard_app.py`: WSGI app and HTML rendering
 
 ## Setup
 ```bash

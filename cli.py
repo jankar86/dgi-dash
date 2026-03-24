@@ -1,9 +1,9 @@
 import argparse
 
-import coverage_report
-import dashboard_app
-import manual_compare
-import workflows
+from ingest import workflows
+from reporting import coverage as coverage_report
+from reporting import manual_compare
+from webapp import dashboard_app
 
 
 def build_parser():
