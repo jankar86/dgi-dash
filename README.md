@@ -50,6 +50,13 @@ Legacy wrappers still work:
 - `venv/bin/python import_fidelity_csv.py`
 - `venv/bin/python import_hist_csv.py`
 
+## Fidelity filename requirements
+- Old-format Fidelity CSVs include an `account` column, and the importer extracts the account digits from that column.
+- New-format Fidelity CSVs do not include an `account` column, so the importer requires the filename to contain 4 or more account digits immediately before `-fidelity`.
+- Accepted examples: `4217-fidelity-2025.csv`, `224294217-fidelity.csv`
+- Rejected examples: `fidelity-4217.csv`, `acct4217.csv`, `broker_export.csv`
+- New-format Fidelity files that do not follow this pattern are rejected and are not imported.
+
 ## Reporting
 ```bash
 # Latest transaction date per account

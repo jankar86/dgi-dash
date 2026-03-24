@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 - Documentation updates and upcoming ingestion automation work.
+- Documented the required filename pattern for new-format Fidelity CSV imports.
+- New-format Fidelity CSVs with filenames that do not match the required account suffix pattern are now rejected before import.
 
 ## [2026-03-23]
 ### Added

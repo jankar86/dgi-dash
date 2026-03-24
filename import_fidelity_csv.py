@@ -27,7 +27,11 @@ def _infer_account_from_filename(filepath):
     filename = os.path.basename(filepath)
     match = re.search(r"(\d{4,})-fidelity", filename.lower())
     if not match:
-        return "FIDELITY-UNKNOWN"
+        raise ValueError(
+            "New-format Fidelity CSV filenames must include 4+ account digits "
+            "immediately before '-fidelity', for example '4217-fidelity-2025.csv'. "
+            f"Received: {filename}"
+        )
 
     suffix = match.group(1)
     candidates = (
