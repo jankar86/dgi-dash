@@ -3,9 +3,15 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
-- Documentation updates and upcoming ingestion automation work.
+- Added an `import-all` CLI workflow to run database setup plus the standard historical, Fidelity, and E*TRADE imports in one deterministic pass.
+- Added an `import-current` CLI workflow to ingest only live drop-folder Fidelity and E*TRADE data from `data/fidelity` and `data/etrade`.
+- Added an `archive-processed` CLI workflow to explicitly move reviewed current CSV files into the archived source folders without overwriting existing archived files.
+- Added an `import-manual-interest` CLI workflow to import manual-ledger interest rows into a dedicated `MANUAL-INTEREST` account.
+- Added a migration that reclassifies legacy `INTEREST` rows into the dedicated `MANUAL-INTEREST` account.
+- Documentation updates for the recommended automated local ingestion path.
 - Documented the required filename pattern for new-format Fidelity CSV imports.
 - New-format Fidelity CSVs with filenames that do not match the required account suffix pattern are now rejected before import.
+- Added a manual-ledger comparison report to reconcile date/security/amount records against the database while ignoring interest rows.
 
 ## [2026-03-23]
 ### Added

@@ -163,5 +163,7 @@ cython_debug/
 
 # Local ingestion data (never commit raw CSVs)
 data/**/*.csv
+data/**/*.xlsx
+data/**/*.xls
 dividends.db
 backups/*.sql

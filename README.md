@@ -30,17 +30,63 @@ venv/bin/python cli.py setup-db
 
 ## Import workflows
 ```bash
+# Current drop-folder import
+venv/bin/python cli.py import-current
+
+# Archive reviewed current files into archived storage
+venv/bin/python cli.py archive-processed --dry-run
+
+# Archived/bootstrap import
+venv/bin/python cli.py import-all
+
 # Generic file
 venv/bin/python cli.py import --source generic --path your_brokerage_dump.csv
 
 # E*TRADE (single file or folder)
-venv/bin/python cli.py import --source etrade --path data/etrade
+venv/bin/python cli.py import --source etrade --path data/archived/etrade
 
-# Fidelity
-venv/bin/python cli.py import --source fidelity --path data/fidelity/fid-dev.csv
+# Fidelity (single file or folder)
+venv/bin/python cli.py import --source fidelity --path data/archived/fidelity
 
 # Historical
 venv/bin/python cli.py import --source historical --path data/archived/historical_divs.csv
+```
+
+`import-current` is the recommended day-to-day ingestion entrypoint:
+- runs `setup-db` first unless `--skip-setup` is passed
+- imports only current Fidelity and E*TRADE drop-folder data
+- defaults to `data/fidelity` and `data/etrade`
+- skips a source cleanly if the folder is missing or empty
+
+Example:
+```bash
+venv/bin/python cli.py import-current
+venv/bin/python cli.py import-current --fidelity-path /mounted/fidelity --etrade-path /mounted/etrade
+```
+
+`archive-processed` is the explicit post-review archive step:
+- moves `.csv` files from `data/fidelity` to `data/archived/fidelity`
+- moves `.csv` files from `data/etrade` to `data/archived/etrade`
+- preserves subdirectories when present
+- refuses to overwrite an existing archived file
+- supports `--dry-run` so you can inspect the move set first
+
+Example:
+```bash
+venv/bin/python cli.py archive-processed --dry-run
+venv/bin/python cli.py archive-processed
+```
+
+`import-all` is the archived/bootstrap ingestion entrypoint:
+- runs `setup-db` first unless `--skip-setup` is passed
+- imports historical data first, then Fidelity, then E*TRADE
+- auto-discovers the local archived source paths by default
+- accepts `--historical-path`, `--fidelity-path`, and `--etrade-path` overrides when needed
+
+Example:
+```bash
+venv/bin/python cli.py import-all
+venv/bin/python cli.py import-all --skip-setup
 ```
 
 Legacy wrappers still work:
@@ -67,7 +113,29 @@ venv/bin/python cli.py report-coverage --as-of 2026-03-23
 
 # Month-level gap report
 venv/bin/python cli.py report-gaps
+
+# Compare manual ledger against DB
+venv/bin/python cli.py report-manual-compare --path data/manual/dividend_log.csv
+
+# Import manual-ledger interest rows into a dedicated account
+venv/bin/python cli.py import-manual-interest --path reports/dividend_history_manual_reconciliation_manual_interest_ignored.csv
 ```
+
+The manual compare report:
+- accepts CSV files directly
+- accepts Excel files when `openpyxl` is installed in the local `venv`
+- expects columns for date, security, and amount
+- ignores manual rows whose security contains `interest`
+- fuzzy-matches on security plus date and amount tolerances
+- writes summary and unmatched-row CSVs under `reports/`
+
+Manual interest import:
+- imports interest rows into the dedicated account `MANUAL-INTEREST` by default
+- uses the existing `INTEREST` security ticker in the DB
+- dedupes through the normal transaction upsert path
+- accepts either a simple manual ledger file or the generated `*_manual_interest_ignored.csv` report
+- if you point it at an Excel workbook, Excel support still requires `openpyxl` in the local `venv`
+- existing legacy `INTEREST` rows are migrated into `MANUAL-INTEREST` during `setup-db`
 
 ## Testing
 ```bash

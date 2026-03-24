@@ -2,7 +2,12 @@ import os
 import re
 import pandas as pd
 from models import TxnType
-from import_utils import create_session, upsert_transaction
+from import_utils import (
+    create_session,
+    drop_unknown_placeholder_rows,
+    drop_zero_amount_rows,
+    upsert_transaction,
+)
 
 session = create_session()
 
@@ -60,6 +65,14 @@ def _parse_etrade_legacy(lines, filepath):
     df["source_system"] = "etrade_csv"
     df["source_file"] = filepath
     df["raw_action"] = df["transactiontype"]
+    df = drop_unknown_placeholder_rows(
+        df,
+        column_name="symbol",
+        source_name="etrade",
+        filepath=filepath,
+        field_label="symbol",
+    )
+    df = drop_zero_amount_rows(df, source_name="etrade", filepath=filepath)
     return account_number, df
 
 
@@ -114,6 +127,14 @@ def _parse_etrade_new(lines, filepath):
     df["source_system"] = "etrade_csv"
     df["source_file"] = filepath
     df["raw_action"] = df["activity type"]
+    df = drop_unknown_placeholder_rows(
+        df,
+        column_name="symbol",
+        source_name="etrade",
+        filepath=filepath,
+        field_label="symbol",
+    )
+    df = drop_zero_amount_rows(df, source_name="etrade", filepath=filepath)
     return account_number, df
 
 

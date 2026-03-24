@@ -31,6 +31,46 @@ def _contains_unknown_placeholder(value):
     return normalized == "" or "UNKNOWN" in normalized
 
 
+def _normalize_symbol(symbol):
+    return str(symbol).strip().upper()
+
+
+def _is_zero_amount(value):
+    try:
+        return abs(float(value)) < 1e-9
+    except (TypeError, ValueError):
+        return False
+
+
+def drop_zero_amount_rows(df, *, source_name, filepath):
+    if "amount" not in df.columns:
+        return df
+
+    zero_mask = df["amount"].apply(_is_zero_amount)
+    zero_count = int(zero_mask.sum())
+    if zero_count:
+        print(
+            f"⚠️ Skipping {zero_count} zero-amount {source_name} rows from {filepath}"
+        )
+        return df.loc[~zero_mask].copy()
+    return df
+
+
+def drop_unknown_placeholder_rows(df, *, column_name, source_name, filepath, field_label=None):
+    if column_name not in df.columns:
+        return df
+
+    unknown_mask = df[column_name].apply(_contains_unknown_placeholder)
+    unknown_count = int(unknown_mask.sum())
+    if unknown_count:
+        label = field_label or column_name
+        print(
+            f"⚠️ Skipping {unknown_count} {source_name} rows with unknown {label} from {filepath}"
+        )
+        return df.loc[~unknown_mask].copy()
+    return df
+
+
 def _log_import_guard_failure(*, reason, account_name, symbol, txn_type, date, amount, source_system, source_file, raw_action):
     IMPORT_GUARD_LOG.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.utcnow().isoformat(timespec="seconds")
@@ -92,9 +132,10 @@ def _get_or_create_account(session, account_name):
 
 
 def _get_or_create_security(session, symbol):
-    security = session.query(Security).filter_by(ticker=symbol).first()
+    normalized_symbol = _normalize_symbol(symbol)
+    security = session.query(Security).filter_by(ticker=normalized_symbol).first()
     if not security:
-        security = Security(ticker=symbol)
+        security = Security(ticker=normalized_symbol)
         session.add(security)
     return security
 
@@ -143,7 +184,21 @@ def upsert_transaction(
             raw_action=raw_action,
         )
         raise ValueError(f"Refusing to import transaction with unknown symbol: {symbol!r}")
+    if _is_zero_amount(amount):
+        _log_import_guard_failure(
+            reason="zero_amount",
+            account_name=account_name,
+            symbol=symbol,
+            txn_type=txn_type,
+            date=date,
+            amount=amount,
+            source_system=source_system,
+            source_file=source_file,
+            raw_action=raw_action,
+        )
+        raise ValueError(f"Refusing to import zero-amount transaction for symbol: {symbol!r}")
 
+    symbol = _normalize_symbol(symbol)
     account = _get_or_create_account(session, account_name)
     security = _get_or_create_security(session, symbol)
     session.flush()

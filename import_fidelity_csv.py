@@ -4,7 +4,12 @@ import os
 import re
 import pandas as pd
 from models import Account, TxnType
-from import_utils import create_session, upsert_transaction
+from import_utils import (
+    create_session,
+    drop_unknown_placeholder_rows,
+    drop_zero_amount_rows,
+    upsert_transaction,
+)
 
 session = create_session()
 
@@ -86,7 +91,21 @@ def load_fidelity_csv(filepath):
     df['source_file'] = filepath
     df['raw_action'] = df['action']
 
-    return df
+    df = drop_unknown_placeholder_rows(
+        df,
+        column_name="symbol",
+        source_name="fidelity",
+        filepath=filepath,
+        field_label="symbol",
+    )
+    df = drop_unknown_placeholder_rows(
+        df,
+        column_name="account",
+        source_name="fidelity",
+        filepath=filepath,
+        field_label="account",
+    )
+    return drop_zero_amount_rows(df, source_name="fidelity", filepath=filepath)
 
 def import_transactions(df):
     imported_count = 0

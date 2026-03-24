@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 
 from sqlalchemy import create_engine, inspect, text
 
@@ -11,9 +12,12 @@ import import_hist_csv
 
 
 DEFAULT_GENERIC_PATH = "your_brokerage_dump.csv"
-DEFAULT_ETRADE_PATH = "data/etrade"
-DEFAULT_FIDELITY_PATH = "data/fidelity/fid-dev.csv"
+DEFAULT_ETRADE_PATH = "data/archived/etrade"
+DEFAULT_FIDELITY_PATH = "data/archived/fidelity"
 DEFAULT_HISTORICAL_PATH = "data/archived/historical_divs.csv"
+DEFAULT_CURRENT_ETRADE_PATH = "data/etrade"
+DEFAULT_CURRENT_FIDELITY_PATH = "data/fidelity"
+DEFAULT_AUTO_IMPORT_ORDER = ("historical", "fidelity", "etrade")
 
 
 def _log_event(event, **fields):
@@ -22,6 +26,92 @@ def _log_event(event, **fields):
         print(f"event={event} {details}")
     else:
         print(f"event={event}")
+
+
+def _first_existing_path(*candidates):
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return candidates[0] if candidates else None
+
+
+def get_default_etrade_path():
+    return _first_existing_path(
+        DEFAULT_ETRADE_PATH,
+        DEFAULT_CURRENT_ETRADE_PATH,
+    )
+
+
+def get_default_fidelity_path():
+    return _first_existing_path(
+        DEFAULT_FIDELITY_PATH,
+        DEFAULT_CURRENT_FIDELITY_PATH,
+        "data/archived/fidelity/fid-dev.csv",
+        "data/fidelity/fid-dev.csv",
+    )
+
+
+def get_default_historical_path():
+    return _first_existing_path(
+        DEFAULT_HISTORICAL_PATH,
+        "historical_divs.csv",
+    )
+
+
+def get_current_etrade_path():
+    return DEFAULT_CURRENT_ETRADE_PATH
+
+
+def get_current_fidelity_path():
+    return DEFAULT_CURRENT_FIDELITY_PATH
+
+
+def _iter_csv_files(path):
+    if os.path.isfile(path):
+        return [path]
+    if not os.path.isdir(path):
+        raise FileNotFoundError(f"Import path does not exist: {path}")
+
+    csv_files = []
+    for root, _, files in os.walk(path):
+        for file in sorted(files):
+            if file.lower().endswith(".csv"):
+                csv_files.append(os.path.join(root, file))
+    return csv_files
+
+
+def _path_has_csv_files(path):
+    if not path or not os.path.exists(path):
+        return False
+    if os.path.isfile(path):
+        return path.lower().endswith(".csv")
+    for _root, _dirs, files in os.walk(path):
+        for file in files:
+            if file.lower().endswith(".csv"):
+                return True
+    return False
+
+
+def _iter_csv_file_pairs(source_path, archive_path):
+    if not source_path or not os.path.exists(source_path):
+        return
+
+    if os.path.isfile(source_path):
+        if source_path.lower().endswith(".csv"):
+            yield source_path, os.path.join(archive_path, os.path.basename(source_path))
+        return
+
+    for root, _, files in os.walk(source_path):
+        for file in sorted(files):
+            if not file.lower().endswith(".csv"):
+                continue
+            src_file = os.path.join(root, file)
+            relative_dir = os.path.relpath(root, source_path)
+            if relative_dir == ".":
+                dest_file = os.path.join(archive_path, file)
+            else:
+                dest_file = os.path.join(archive_path, relative_dir, file)
+            yield src_file, dest_file
 
 
 def setup_db(db_url="sqlite:///dividends.db"):
@@ -74,6 +164,8 @@ def _run_post_create_migrations(engine):
                 "WHERE txn_type = 'DIVIDEND' AND amount < 0"
             )
         )
+        _merge_security_case_aliases(conn)
+        _move_interest_transactions_to_manual_account(conn)
         _merge_fidelity_alias_accounts(conn)
 
 
@@ -190,6 +282,119 @@ def _ensure_transaction_indexes(engine):
         )
 
 
+def _merge_security_case_aliases(conn):
+    rows = conn.execute(
+        text("SELECT id, ticker FROM securities")
+    ).fetchall()
+    if not rows:
+        return
+
+    grouped = {}
+    for security_id, ticker in rows:
+        normalized = (ticker or "").strip().upper()
+        if not normalized:
+            continue
+        grouped.setdefault(normalized, []).append((security_id, ticker))
+
+    for normalized, members in grouped.items():
+        uppercase_member = next((member for member in members if member[1] == normalized), None)
+        target_id = uppercase_member[0] if uppercase_member else members[0][0]
+
+        conn.execute(
+            text("UPDATE securities SET ticker = :ticker WHERE id = :security_id"),
+            {"ticker": normalized, "security_id": target_id},
+        )
+
+        for old_id, old_ticker in members:
+            if old_id == target_id:
+                continue
+
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM transactions
+                    WHERE security_id = :old_id
+                      AND EXISTS (
+                        SELECT 1 FROM transactions t2
+                        WHERE t2.security_id = :target_id
+                          AND t2.account_id = transactions.account_id
+                          AND t2.txn_type = transactions.txn_type
+                          AND t2.date = transactions.date
+                          AND t2.amount = transactions.amount
+                      )
+                    """
+                ),
+                {"target_id": target_id, "old_id": old_id},
+            )
+            conn.execute(
+                text("UPDATE transactions SET security_id = :target_id WHERE security_id = :old_id"),
+                {"target_id": target_id, "old_id": old_id},
+            )
+            conn.execute(
+                text("DELETE FROM securities WHERE id = :old_id"),
+                {"old_id": old_id},
+            )
+
+
+def _move_interest_transactions_to_manual_account(conn):
+    interest_security_id = conn.execute(
+        text("SELECT id FROM securities WHERE ticker = 'INTEREST' LIMIT 1")
+    ).scalar()
+    if not interest_security_id:
+        return
+
+    manual_account_id = conn.execute(
+        text("SELECT id FROM accounts WHERE name = 'MANUAL-INTEREST' LIMIT 1")
+    ).scalar()
+    if not manual_account_id:
+        conn.execute(
+            text("INSERT INTO accounts(name) VALUES ('MANUAL-INTEREST')")
+        )
+        manual_account_id = conn.execute(
+            text("SELECT id FROM accounts WHERE name = 'MANUAL-INTEREST' LIMIT 1")
+        ).scalar()
+
+    if not manual_account_id:
+        return
+
+    conn.execute(
+        text(
+            """
+            DELETE FROM transactions
+            WHERE security_id = :interest_security_id
+              AND account_id != :manual_account_id
+              AND EXISTS (
+                SELECT 1 FROM transactions t2
+                WHERE t2.account_id = :manual_account_id
+                  AND t2.security_id = transactions.security_id
+                  AND t2.txn_type = transactions.txn_type
+                  AND t2.date = transactions.date
+                  AND t2.amount = transactions.amount
+              )
+            """
+        ),
+        {
+            "interest_security_id": interest_security_id,
+            "manual_account_id": manual_account_id,
+        },
+    )
+    conn.execute(
+        text(
+            """
+            UPDATE transactions
+            SET account_id = :manual_account_id,
+                allocation_status = 'ALLOCATED'
+            WHERE security_id = :interest_security_id
+              AND account_id != :manual_account_id
+            """
+        ),
+        {
+            "interest_security_id": interest_security_id,
+            "manual_account_id": manual_account_id,
+        },
+    )
+
+
 def _merge_fidelity_alias_accounts(conn):
     rows = conn.execute(
         text("SELECT id, name FROM accounts WHERE name LIKE 'FIDELITY-%'")
@@ -258,24 +463,32 @@ def run_generic_import(filepath=DEFAULT_GENERIC_PATH):
 
 
 def run_fidelity_import(filepath=DEFAULT_FIDELITY_PATH):
+    filepath = filepath or get_default_fidelity_path()
+    total_imported = 0
+    total_skipped = 0
     _log_event("import_start", source="fidelity", path=filepath)
-    df = import_fidelity_csv.load_fidelity_csv(filepath)
-    if df is None:
-        _log_event("import_complete", source="fidelity", path=filepath, imported=0, skipped=0)
-        return 0, 0
 
-    imported_count, skipped_count = import_fidelity_csv.import_transactions(df)
+    for csv_path in _iter_csv_files(filepath):
+        df = import_fidelity_csv.load_fidelity_csv(csv_path)
+        if df is None:
+            continue
+
+        imported_count, skipped_count = import_fidelity_csv.import_transactions(df)
+        total_imported += imported_count
+        total_skipped += skipped_count
+
     _log_event(
         "import_complete",
         source="fidelity",
         path=filepath,
-        imported=imported_count,
-        skipped=skipped_count,
+        imported=total_imported,
+        skipped=total_skipped,
     )
-    return imported_count, skipped_count
+    return total_imported, total_skipped
 
 
 def run_historical_import(filepath=DEFAULT_HISTORICAL_PATH):
+    filepath = filepath or get_default_historical_path()
     _log_event("import_start", source="historical", path=filepath)
     df = import_hist_csv.load_custom_historical(filepath)
     if df is None:
@@ -294,6 +507,7 @@ def run_historical_import(filepath=DEFAULT_HISTORICAL_PATH):
 
 
 def run_etrade_import(path=DEFAULT_ETRADE_PATH):
+    path = path or get_default_etrade_path()
     total_imported = 0
     total_skipped = 0
     _log_event("import_start", source="etrade", path=path)
@@ -315,3 +529,203 @@ def run_etrade_import(path=DEFAULT_ETRADE_PATH):
         skipped=total_skipped,
     )
     return total_imported, total_skipped
+
+
+def run_all_imports(
+    *,
+    historical_path=None,
+    fidelity_path=None,
+    etrade_path=None,
+    setup=True,
+):
+    if setup:
+        setup_db()
+
+    resolved_paths = {
+        "historical": historical_path or get_default_historical_path(),
+        "fidelity": fidelity_path or get_default_fidelity_path(),
+        "etrade": etrade_path or get_default_etrade_path(),
+    }
+    results = {}
+    total_imported = 0
+    total_skipped = 0
+
+    _log_event(
+        "import_all_start",
+        historical=resolved_paths["historical"],
+        fidelity=resolved_paths["fidelity"],
+        etrade=resolved_paths["etrade"],
+    )
+
+    for source in DEFAULT_AUTO_IMPORT_ORDER:
+        path = resolved_paths[source]
+        if source == "historical":
+            imported_count, skipped_count = run_historical_import(path)
+        elif source == "fidelity":
+            imported_count, skipped_count = run_fidelity_import(path)
+        else:
+            imported_count, skipped_count = run_etrade_import(path)
+
+        results[source] = {
+            "path": path,
+            "imported": imported_count,
+            "skipped": skipped_count,
+        }
+        total_imported += imported_count
+        total_skipped += skipped_count
+
+    _log_event(
+        "import_all_complete",
+        imported=total_imported,
+        skipped=total_skipped,
+        sources=len(results),
+    )
+    return {
+        "results": results,
+        "imported": total_imported,
+        "skipped": total_skipped,
+    }
+
+
+def run_current_imports(
+    *,
+    fidelity_path=None,
+    etrade_path=None,
+    setup=True,
+):
+    if setup:
+        setup_db()
+
+    resolved_paths = {
+        "fidelity": fidelity_path or get_current_fidelity_path(),
+        "etrade": etrade_path or get_current_etrade_path(),
+    }
+    results = {}
+    total_imported = 0
+    total_skipped = 0
+
+    _log_event(
+        "import_current_start",
+        fidelity=resolved_paths["fidelity"],
+        etrade=resolved_paths["etrade"],
+    )
+
+    for source in ("fidelity", "etrade"):
+        path = resolved_paths[source]
+        if not _path_has_csv_files(path):
+            _log_event("import_skipped", source=source, path=path, reason="path_missing_or_empty")
+            results[source] = {
+                "path": path,
+                "imported": 0,
+                "skipped": 0,
+                "status": "skipped",
+            }
+            continue
+
+        if source == "fidelity":
+            imported_count, skipped_count = run_fidelity_import(path)
+        else:
+            imported_count, skipped_count = run_etrade_import(path)
+
+        results[source] = {
+            "path": path,
+            "imported": imported_count,
+            "skipped": skipped_count,
+            "status": "processed",
+        }
+        total_imported += imported_count
+        total_skipped += skipped_count
+
+    _log_event(
+        "import_current_complete",
+        imported=total_imported,
+        skipped=total_skipped,
+        sources=len(results),
+    )
+    return {
+        "results": results,
+        "imported": total_imported,
+        "skipped": total_skipped,
+    }
+
+
+def archive_processed_files(
+    *,
+    fidelity_path=None,
+    etrade_path=None,
+    archived_fidelity_path=None,
+    archived_etrade_path=None,
+    dry_run=False,
+):
+    moves = {
+        "fidelity": (
+            fidelity_path or get_current_fidelity_path(),
+            archived_fidelity_path or DEFAULT_FIDELITY_PATH,
+        ),
+        "etrade": (
+            etrade_path or get_current_etrade_path(),
+            archived_etrade_path or DEFAULT_ETRADE_PATH,
+        ),
+    }
+    results = {}
+
+    _log_event(
+        "archive_processed_start",
+        fidelity_source=moves["fidelity"][0],
+        fidelity_archive=moves["fidelity"][1],
+        etrade_source=moves["etrade"][0],
+        etrade_archive=moves["etrade"][1],
+        dry_run=dry_run,
+    )
+
+    for source, (source_path, archive_path) in moves.items():
+        moved_count = 0
+        conflict_count = 0
+        skipped_count = 0
+
+        if not _path_has_csv_files(source_path):
+            _log_event("archive_skipped", source=source, path=source_path, reason="path_missing_or_empty")
+            results[source] = {
+                "source_path": source_path,
+                "archive_path": archive_path,
+                "moved": 0,
+                "conflicts": 0,
+                "skipped": 0,
+                "status": "skipped",
+            }
+            continue
+
+        for src_file, dest_file in _iter_csv_file_pairs(source_path, archive_path):
+            if os.path.exists(dest_file):
+                print(f"⚠️ Archive conflict, leaving file in place: {src_file} -> {dest_file}")
+                conflict_count += 1
+                continue
+
+            if dry_run:
+                print(f"DRY RUN move: {src_file} -> {dest_file}")
+                moved_count += 1
+                continue
+
+            os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+            shutil.move(src_file, dest_file)
+            print(f"Archived: {src_file} -> {dest_file}")
+            moved_count += 1
+
+        results[source] = {
+            "source_path": source_path,
+            "archive_path": archive_path,
+            "moved": moved_count,
+            "conflicts": conflict_count,
+            "skipped": skipped_count,
+            "status": "processed",
+        }
+
+    _log_event(
+        "archive_processed_complete",
+        fidelity_moved=results.get("fidelity", {}).get("moved", 0),
+        fidelity_conflicts=results.get("fidelity", {}).get("conflicts", 0),
+        etrade_moved=results.get("etrade", {}).get("moved", 0),
+        etrade_conflicts=results.get("etrade", {}).get("conflicts", 0),
+        dry_run=dry_run,
+    )
+    return results
