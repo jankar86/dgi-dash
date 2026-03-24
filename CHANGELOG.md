@@ -3,6 +3,9 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+- Added a read-only web dashboard and transaction explorer for the local database.
+- Added a `serve-web` CLI command for running the dashboard locally.
+- Added a basic `Dockerfile` and `requirements.txt` for single-container deployment.
 - Added an `import-all` CLI workflow to run database setup plus the standard historical, Fidelity, and E*TRADE imports in one deterministic pass.
 - Added an `import-current` CLI workflow to ingest only live drop-folder Fidelity and E*TRADE data from `data/fidelity` and `data/etrade`.
 - Added an `archive-processed` CLI workflow to explicitly move reviewed current CSV files into the archived source folders without overwriting existing archived files.

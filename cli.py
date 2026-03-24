@@ -1,6 +1,7 @@
 import argparse
 
 import coverage_report
+import dashboard_app
 import manual_compare
 import workflows
 
@@ -10,6 +11,17 @@ def build_parser():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("setup-db", help="Initialize database schema")
+    serve_parser = subparsers.add_parser(
+        "serve-web",
+        help="Run the read-only web dashboard against the local database",
+    )
+    serve_parser.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    serve_parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
+    serve_parser.add_argument(
+        "--db-url",
+        default=dashboard_app.DEFAULT_DB_URL,
+        help="Database URL (default: env DATABASE_URL or sqlite:///dividends.db)",
+    )
     import_all_parser = subparsers.add_parser(
         "import-all",
         help="Set up the DB and run the standard historical, Fidelity, and E*TRADE imports",
@@ -144,6 +156,10 @@ def main(argv=None):
 
     if args.command == "setup-db":
         workflows.setup_db()
+        return 0
+
+    if args.command == "serve-web":
+        dashboard_app.serve(host=args.host, port=args.port, db_url=args.db_url)
         return 0
 
     if args.command == "import-all":

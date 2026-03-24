@@ -28,6 +28,21 @@ venv/bin/pip install -r requirements.txt
 venv/bin/python cli.py setup-db
 ```
 
+## Web UI
+```bash
+# Local read-only dashboard
+venv/bin/python cli.py serve-web --host 127.0.0.1 --port 8000
+```
+
+Available routes:
+- `/`: dashboard
+- `/transactions`: filterable transaction table
+- `/api/summary`: JSON dashboard payload
+- `/api/transactions`: JSON transaction payload
+
+The web layer is intentionally read-only and uses the existing SQLite database by default.
+You can override the DB target with `--db-url` or `DATABASE_URL`.
+
 ## Import workflows
 ```bash
 # Current drop-folder import
@@ -171,3 +186,17 @@ sqlite3 dividends_restored.db < backups/dividends_snapshot_YYYYMMDD_HHMMSS.sql
 - Raw CSV files are ignored by git (`data/**/*.csv`)
 - Local DB file is ignored by git (`dividends.db`)
 - SQL snapshots are ignored by git (`backups/*.sql`)
+
+## Container
+Build:
+```bash
+docker build -t dgi-dash .
+```
+
+Run with a mounted persistent DB path:
+```bash
+docker run --rm -p 8000:8000 \
+  -e DATABASE_URL=sqlite:////app/state/dividends.db \
+  -v /your/unraid/path:/app/state \
+  dgi-dash
+```
