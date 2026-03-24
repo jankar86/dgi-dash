@@ -14,7 +14,6 @@ CSV-to-SQLite ingestion utilities for dividend transaction tracking.
 - `ingest/`: importers plus ingestion/archive workflows
 - `reporting/`: coverage and reconciliation/reporting logic
 - `webapp/`: read-only dashboard UI and query layer
-- top-level `models.py`, `workflows.py`, `import_*.py`, and report modules: compatibility wrappers for legacy commands
 - `data/`: local CSV input folders (ignored by git)
 - `backups/`: SQL dump snapshots (ignored by git)
 
@@ -114,12 +113,7 @@ venv/bin/python cli.py import-all
 venv/bin/python cli.py import-all --skip-setup
 ```
 
-Legacy wrappers still work:
-- `venv/bin/python db_setup.py`
-- `venv/bin/python import_csv.py`
-- `venv/bin/python import_etrade_csv.py`
-- `venv/bin/python import_fidelity_csv.py`
-- `venv/bin/python import_hist_csv.py`
+The supported entrypoint is `venv/bin/python cli.py ...`.
 
 ## Fidelity filename requirements
 - Old-format Fidelity CSVs include an `account` column, and the importer extracts the account digits from that column.

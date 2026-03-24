@@ -3,6 +3,8 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+- Refactored the codebase into logical packages: `db`, `ingest`, `reporting`, and `webapp`.
+- Removed legacy top-level wrapper modules and standardized on `cli.py` as the single supported entrypoint.
 - Added a read-only web dashboard and transaction explorer for the local database.
 - Added a `serve-web` CLI command for running the dashboard locally.
 - Added a basic `Dockerfile` and `requirements.txt` for single-container deployment.

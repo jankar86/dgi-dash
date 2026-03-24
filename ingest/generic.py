@@ -1,4 +1,4 @@
-# import_csv.py
+# Generic CSV import helpers
 from datetime import datetime
 
 import pandas as pd

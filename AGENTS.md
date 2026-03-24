@@ -3,15 +3,14 @@
 ## Repository purpose
 - This repository manages database setup and CSV-based data ingestion.
 - Source data lives under the `data/` directory, organized into subfolders.
-- Different import scripts exist for different CSV formats and sources.
+- The main entrypoint is `cli.py`, with implementation split into logical packages.
 
 ## Current file roles
-- `db_setup.py` initializes or updates the database schema
-- `models.py` contains the database models
-- `import_csv.py` contains generic CSV import logic or shared import behavior
-- `import_etrade_csv.py` imports E*TRADE CSV data
-- `import_fidelity_csv.py` imports Fidelity CSV data
-- `import_hist_csv.py` imports historical CSV data
+- `cli.py` is the single supported command entrypoint
+- `db/` contains the database models and shared DB utilities
+- `ingest/` contains generic, E*TRADE, Fidelity, and historical import logic plus workflow orchestration
+- `reporting/` contains coverage and reconciliation/reporting logic
+- `webapp/` contains the read-only presentation layer and query code
 
 ## Environment
 - Use the local virtual environment at `venv`
@@ -29,15 +28,19 @@
 ## Commands
 - Create venv: `python3 -m venv venv`
 - Install dependencies: `venv/bin/pip install -r requirements.txt`
-- Setup database: `venv/bin/python db_setup.py`
-- Run generic CSV import: `venv/bin/python import_csv.py`
-- Run E*TRADE import: `venv/bin/python import_etrade_csv.py`
-- Run Fidelity import: `venv/bin/python import_fidelity_csv.py`
-- Run historical import: `venv/bin/python import_hist_csv.py`
+- Setup database: `venv/bin/python cli.py setup-db`
+- Run generic CSV import: `venv/bin/python cli.py import --source generic --path <file>`
+- Run E*TRADE import: `venv/bin/python cli.py import --source etrade --path <file-or-dir>`
+- Run Fidelity import: `venv/bin/python cli.py import --source fidelity --path <file-or-dir>`
+- Run historical import: `venv/bin/python cli.py import --source historical --path data/archived/historical_divs.csv`
+- Run current drop-folder import: `venv/bin/python cli.py import-current`
+- Run archived/bootstrap import: `venv/bin/python cli.py import-all`
+- Run web app: `venv/bin/python cli.py serve-web --host 127.0.0.1 --port 8000`
 - Run tests: `venv/bin/pytest -q`
 
 ## Guidance for Codex
 - First inspect the repository and explain the role of each script
+- Explain the role of each package (`db`, `ingest`, `reporting`, `webapp`) before proposing structural changes
 - Identify duplicated parsing, validation, and database-insert logic
 - Suggest opportunities to consolidate import workflows into shared modules
 - Prefer evolving toward a single CLI entrypoint if it simplifies maintenance
