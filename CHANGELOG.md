@@ -14,8 +14,10 @@ All notable changes to this project are documented in this file.
 - Added an `import-manual-interest` CLI workflow to import manual-ledger interest rows into a dedicated `MANUAL-INTEREST` account.
 - Added a migration that reclassifies legacy `INTEREST` rows into the dedicated `MANUAL-INTEREST` account.
 - Documentation updates for the recommended automated local ingestion path.
-- Documented the required filename pattern for new-format Fidelity CSV imports.
-- New-format Fidelity CSVs with filenames that do not match the required account suffix pattern are now rejected before import.
+- Fidelity imports now require per-row `Account Number` data from the CSV and fail fast instead of inferring account identity from filenames.
+- Broker account names are now normalized to short aliases like `etr-1445` and `fid-4217`, with a migration for existing DB rows.
+- Added extended account metadata fields and backfilled inferred values for broker, manual, and legacy accounts.
+- Account tax metadata now uses user-facing designations like `Taxable`, `Roth IRA`, and `Traditional IRA`.
 - Added a manual-ledger comparison report to reconcile date/security/amount records against the database while ignoring interest rows.
 
 ## [2026-03-23]

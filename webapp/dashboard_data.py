@@ -398,6 +398,15 @@ def get_account_detail(account_name, db_url=DEFAULT_DB_URL):
 
         return {
             "account": account.name,
+            "metadata": {
+                "display_name": account.display_name,
+                "institution": account.institution,
+                "account_last4": account.account_last4,
+                "account_group": account.account_group,
+                "tax_treatment": account.tax_treatment,
+                "is_active": bool(account.is_active),
+                "notes": account.notes,
+            },
             "summary": {
                 "txn_count": int(summary.txn_count or 0),
                 "total_amount": float(summary.total_amount or 0),

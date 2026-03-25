@@ -19,11 +19,9 @@ DATA_DIR = "data/etrade"
 def _format_account_label(account_number):
     cleaned = str(account_number).strip()
     digits = "".join(ch for ch in cleaned if ch.isdigit())
-    if digits and len(digits) == 4:
-        return f"ETRADE-#####{digits}"
     if digits:
-        return f"ETRADE-{digits}"
-    return f"ETRADE-{cleaned}"
+        return f"etr-{digits[-4:]}"
+    return f"etr-{cleaned.lower()}"
 
 
 def _parse_etrade_legacy(lines, filepath):

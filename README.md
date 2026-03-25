@@ -116,11 +116,10 @@ venv/bin/python cli.py import-all --skip-setup
 The supported entrypoint is `venv/bin/python cli.py ...`.
 
 ## Fidelity filename requirements
-- Old-format Fidelity CSVs include an `account` column, and the importer extracts the account digits from that column.
-- New-format Fidelity CSVs do not include an `account` column, so the importer requires the filename to contain 4 or more account digits immediately before `-fidelity`.
-- Accepted examples: `4217-fidelity-2025.csv`, `224294217-fidelity.csv`
-- Rejected examples: `fidelity-4217.csv`, `acct4217.csv`, `broker_export.csv`
-- New-format Fidelity files that do not follow this pattern are rejected and are not imported.
+- Fidelity imports now require an `Account Number` column in the CSV itself.
+- Account assignment is derived per row from that `Account Number` value, so one CSV can safely contain transactions for multiple Fidelity accounts.
+- The importer does not infer Fidelity account numbers from filenames anymore.
+- If a Fidelity dividend/reinvestment row is missing a usable `Account Number`, the import fails with an explicit error instead of guessing.
 
 ## Reporting
 ```bash
@@ -155,6 +154,16 @@ Manual interest import:
 - accepts either a simple manual ledger file or the generated `*_manual_interest_ignored.csv` report
 - if you point it at an Excel workbook, Excel support still requires `openpyxl` in the local `venv`
 - existing legacy `INTEREST` rows are migrated into `MANUAL-INTEREST` during `setup-db`
+
+Broker account naming:
+- E*TRADE accounts are normalized to short aliases like `etr-1445`
+- Fidelity accounts are normalized to short aliases like `fid-4217`
+- `setup-db` migrates older `ETRADE-*` and `FIDELITY-*` account names into the short alias format
+
+Account metadata:
+- accounts now carry optional metadata such as display name, institution, last-4, account group, tax treatment, active status, and notes
+- `setup-db` backfills this metadata for the known broker, manual, and legacy account patterns
+- current tax designations use user-facing values such as `Taxable`, `Roth IRA`, and `Traditional IRA`
 
 ## Testing
 ```bash

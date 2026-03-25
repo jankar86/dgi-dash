@@ -125,6 +125,7 @@ def _run_post_create_migrations(engine):
     if "transactions" not in inspector.get_table_names():
         return
 
+    _ensure_accounts_schema(engine)
     _ensure_transactions_schema(engine)
     _ensure_transaction_indexes(engine)
 
@@ -163,7 +164,29 @@ def _run_post_create_migrations(engine):
         )
         _merge_security_case_aliases(conn)
         _move_interest_transactions_to_manual_account(conn)
-        _merge_fidelity_alias_accounts(conn)
+        _normalize_broker_account_names(conn)
+        _populate_account_metadata(conn)
+
+
+def _ensure_accounts_schema(engine):
+    with engine.begin() as conn:
+        existing_cols = {
+            row[1] for row in conn.execute(text("PRAGMA table_info(accounts)")).fetchall()
+        }
+
+        required_columns = {
+            "display_name": "ALTER TABLE accounts ADD COLUMN display_name VARCHAR(128)",
+            "institution": "ALTER TABLE accounts ADD COLUMN institution VARCHAR(32)",
+            "account_last4": "ALTER TABLE accounts ADD COLUMN account_last4 VARCHAR(4)",
+            "account_group": "ALTER TABLE accounts ADD COLUMN account_group VARCHAR(32)",
+            "tax_treatment": "ALTER TABLE accounts ADD COLUMN tax_treatment VARCHAR(32)",
+            "is_active": "ALTER TABLE accounts ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1",
+            "notes": "ALTER TABLE accounts ADD COLUMN notes VARCHAR(255)",
+        }
+
+        for column_name, alter_sql in required_columns.items():
+            if column_name not in existing_cols:
+                conn.execute(text(alter_sql))
 
 
 def _ensure_transactions_schema(engine):
@@ -392,56 +415,170 @@ def _move_interest_transactions_to_manual_account(conn):
     )
 
 
-def _merge_fidelity_alias_accounts(conn):
-    rows = conn.execute(
-        text("SELECT id, name FROM accounts WHERE name LIKE 'FIDELITY-%'")
-    ).fetchall()
+def _normalize_broker_account_names(conn):
+    rows = conn.execute(text("SELECT id, name FROM accounts")).fetchall()
     if not rows:
         return
 
-    full_by_suffix = {}
-    alias_rows = []
-    for row in rows:
-        acct_id, name = row
-        m = re.match(r"^FIDELITY-(\d+)$", name or "")
-        if not m:
-            continue
-        digits = m.group(1)
-        if len(digits) >= 5:
-            full_by_suffix.setdefault(digits[-4:], []).append((acct_id, name))
-        elif len(digits) == 4:
-            alias_rows.append((acct_id, name, digits))
+    def normalized_account_name(name):
+        if not name:
+            return None
+        if name.startswith("etr-") or name.startswith("fid-"):
+            return name
 
-    for old_id, _old_name, suffix in alias_rows:
-        candidates = full_by_suffix.get(suffix, [])
-        if len(candidates) != 1:
-            continue
+        fidelity_match = re.match(r"^FIDELITY-(\d+)$", name)
+        if fidelity_match:
+            return f"fid-{fidelity_match.group(1)[-4:]}"
 
-        target_id = candidates[0][0]
+        etrade_match = re.match(r"^ETRADE-[#]*(\d+)$", name)
+        if etrade_match:
+            return f"etr-{etrade_match.group(1)[-4:]}"
+
+        return None
+
+    normalized_targets = {}
+    for account_id, name in rows:
+        target_name = normalized_account_name(name)
+        if not target_name:
+            continue
+        normalized_targets.setdefault(target_name, []).append((account_id, name))
+
+    for target_name, members in normalized_targets.items():
+        preferred = next((member for member in members if member[1] == target_name), members[0])
+        target_id = preferred[0]
+
+        if preferred[1] != target_name:
+            conn.execute(
+                text("UPDATE accounts SET name = :target_name WHERE id = :account_id"),
+                {"target_name": target_name, "account_id": target_id},
+            )
+
+        for old_id, old_name in members:
+            if old_id == target_id or old_name == target_name:
+                continue
+
+            conn.execute(
+                text(
+                    """
+                    DELETE FROM transactions
+                    WHERE account_id = :old_id
+                      AND EXISTS (
+                        SELECT 1 FROM transactions t2
+                        WHERE t2.account_id = :target_id
+                          AND t2.security_id = transactions.security_id
+                          AND t2.txn_type = transactions.txn_type
+                          AND t2.date = transactions.date
+                          AND t2.amount = transactions.amount
+                      )
+                    """
+                ),
+                {"target_id": target_id, "old_id": old_id},
+            )
+            conn.execute(
+                text("UPDATE transactions SET account_id = :target_id WHERE account_id = :old_id"),
+                {"target_id": target_id, "old_id": old_id},
+            )
+            conn.execute(
+                text("DELETE FROM accounts WHERE id = :old_id"),
+                {"old_id": old_id},
+            )
+
+    rows = conn.execute(text("SELECT id, name FROM accounts")).fetchall()
+    for account_id, name in rows:
+        target_name = normalized_account_name(name)
+        if target_name and target_name != name:
+            conn.execute(
+                text("UPDATE accounts SET name = :target_name WHERE id = :account_id"),
+                {"target_name": target_name, "account_id": account_id},
+            )
+
+
+def _populate_account_metadata(conn):
+    rows = conn.execute(text("SELECT id, name FROM accounts")).fetchall()
+    if not rows:
+        return
+
+    def metadata_for(name):
+        if not name:
+            return None
+
+        if name.startswith("etr-"):
+            suffix = name.split("-", 1)[1]
+            return {
+                "display_name": f"E*TRADE {suffix}",
+                "institution": "ETRADE",
+                "account_last4": suffix[-4:],
+                "account_group": "BROKERAGE",
+                "tax_treatment": "Taxable",
+                "is_active": 1,
+                "notes": None,
+            }
+
+        if name == "fid-4217":
+            return {
+                "display_name": "Fidelity Roth IRA",
+                "institution": "FIDELITY",
+                "account_last4": "4217",
+                "account_group": "RETIREMENT",
+                "tax_treatment": "Roth IRA",
+                "is_active": 1,
+                "notes": None,
+            }
+
+        if name == "fid-4185":
+            return {
+                "display_name": "Fidelity Rollover IRA",
+                "institution": "FIDELITY",
+                "account_last4": "4185",
+                "account_group": "RETIREMENT",
+                "tax_treatment": "Traditional IRA",
+                "is_active": 1,
+                "notes": None,
+            }
+
+        if name == "MANUAL-INTEREST":
+            return {
+                "display_name": "Manual Interest",
+                "institution": "MANUAL",
+                "account_last4": None,
+                "account_group": "MANUAL",
+                "tax_treatment": "Taxable",
+                "is_active": 1,
+                "notes": "Imported from the manual ledger workbook.",
+            }
+
+        if name == "UNALLOCATED-LEGACY":
+            return {
+                "display_name": "Unallocated Legacy",
+                "institution": "LEGACY",
+                "account_last4": None,
+                "account_group": "LEGACY",
+                "tax_treatment": None,
+                "is_active": 0,
+                "notes": "Historical rows without original account attribution.",
+            }
+
+        return None
+
+    for account_id, name in rows:
+        metadata = metadata_for(name)
+        if not metadata:
+            continue
         conn.execute(
             text(
                 """
-                DELETE FROM transactions
-                WHERE account_id = :old_id
-                  AND EXISTS (
-                    SELECT 1 FROM transactions t2
-                    WHERE t2.account_id = :target_id
-                      AND t2.security_id = transactions.security_id
-                      AND t2.txn_type = transactions.txn_type
-                      AND t2.date = transactions.date
-                      AND t2.amount = transactions.amount
-                  )
+                UPDATE accounts
+                SET display_name = :display_name,
+                    institution = :institution,
+                    account_last4 = :account_last4,
+                    account_group = :account_group,
+                    tax_treatment = :tax_treatment,
+                    is_active = :is_active,
+                    notes = :notes
+                WHERE id = :account_id
                 """
             ),
-            {"target_id": target_id, "old_id": old_id},
-        )
-        conn.execute(
-            text("UPDATE transactions SET account_id = :target_id WHERE account_id = :old_id"),
-            {"target_id": target_id, "old_id": old_id},
-        )
-        conn.execute(
-            text("DELETE FROM accounts WHERE id = :old_id"),
-            {"old_id": old_id},
+            {"account_id": account_id, **metadata},
         )
 
 

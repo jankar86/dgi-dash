@@ -30,6 +30,13 @@ class Account(Base):
     __tablename__ = "accounts"
     id = Column(Integer, primary_key=True)
     name = Column(String, unique=True)
+    display_name = Column(String(128))
+    institution = Column(String(32))
+    account_last4 = Column(String(4))
+    account_group = Column(String(32))
+    tax_treatment = Column(String(32))
+    is_active = Column(Boolean, nullable=False, default=True)
+    notes = Column(String(255))
 
     transactions = relationship("Transaction", back_populates="account")
 

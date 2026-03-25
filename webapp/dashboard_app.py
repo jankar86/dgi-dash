@@ -397,6 +397,19 @@ def render_account_detail(account_name, db_url=DEFAULT_DB_URL):
     if not data:
         return _base_page("Account Not Found", "<div class='hero'><h2>Account Not Found</h2></div>")
 
+    metadata_rows = "".join(
+        f"<tr><th>{label}</th><td>{_text(value)}</td></tr>"
+        for label, value in [
+            ("Display Name", data["metadata"]["display_name"]),
+            ("Institution", data["metadata"]["institution"]),
+            ("Last 4", data["metadata"]["account_last4"]),
+            ("Group", data["metadata"]["account_group"]),
+            ("Tax Treatment", data["metadata"]["tax_treatment"]),
+            ("Active", "yes" if data["metadata"]["is_active"] else "no"),
+            ("Notes", data["metadata"]["notes"]),
+        ]
+        if value not in (None, "")
+    )
     by_type_rows = "".join(
         f"<tr><td>{_text(row['txn_type'])}</td><td>{row['txn_count']}</td><td class='money'>{_money(row['total_amount'])}</td></tr>"
         for row in data["by_type"]
@@ -411,10 +424,16 @@ def render_account_detail(account_name, db_url=DEFAULT_DB_URL):
     )
     body = f"""
     <div class="hero">
-      <h2>{_text(data['account'])}</h2>
+      <h2>{_text(data['metadata']['display_name'] or data['account'])}</h2>
       <p>From {_text(data['summary']['first_date'])} through {_text(data['summary']['last_date'])}, this account has {data['summary']['txn_count']} transactions totaling {_money(data['summary']['total_amount'])}.</p>
     </div>
     <div class="grid">
+      <div class="card side">
+        <h3>Metadata</h3>
+        <table>
+          <tbody>{metadata_rows}</tbody>
+        </table>
+      </div>
       <div class="card side">
         <h3>By Type</h3>
         <table>

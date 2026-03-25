@@ -1,9 +1,6 @@
-import os
-import re
-
 import pandas as pd
 
-from db.models import Account, TxnType
+from db.models import TxnType
 from db.utils import (
     create_session,
     drop_unknown_placeholder_rows,
@@ -29,25 +26,28 @@ def is_fidelity_format(df):
     return old_expected.issubset(cols) or new_expected.issubset(cols)
 
 
-def _infer_account_from_filename(filepath):
-    filename = os.path.basename(filepath)
-    match = re.search(r"(\d{4,})-fidelity", filename.lower())
-    if not match:
+def _build_account_labels(df, filepath):
+    if "account number" not in df.columns:
         raise ValueError(
-            "New-format Fidelity CSV filenames must include 4+ account digits "
-            "immediately before '-fidelity', for example '4217-fidelity-2025.csv'. "
-            f"Received: {filename}"
+            "Fidelity imports require an 'Account Number' column so each transaction "
+            f"can be mapped to its source account. File: {filepath}"
         )
 
-    suffix = match.group(1)
-    candidates = (
-        session.query(Account)
-        .filter(Account.name.like(f"FIDELITY-%{suffix}"))
-        .all()
+    account_digits = (
+        df["account number"]
+        .astype(str)
+        .str.extract(r"(\d+)", expand=False)
     )
-    if len(candidates) == 1:
-        return candidates[0].name
-    return f"FIDELITY-{suffix}"
+    missing_mask = account_digits.isna() | (account_digits.str.strip() == "")
+    if missing_mask.any():
+        sample_rows = df.loc[missing_mask, ["run date", "account", "account number", "action", "symbol"]]
+        sample_preview = sample_rows.head(3).to_dict(orient="records")
+        raise ValueError(
+            "Fidelity import could not infer account numbers for all dividend rows "
+            f"from file data. File: {filepath}. Sample rows: {sample_preview}"
+        )
+
+    return "fid-" + account_digits.str[-4:]
 
 
 def load_fidelity_csv(filepath):
@@ -73,10 +73,7 @@ def load_fidelity_csv(filepath):
     df["symbol"] = df["symbol"].str.strip().fillna("UNKNOWN")
     df["is_qualified"] = False
 
-    if "account" in df.columns:
-        df["account"] = "FIDELITY-" + df["account"].str.extract(r"(\d+)", expand=False).fillna("UNKNOWN")
-    else:
-        df["account"] = _infer_account_from_filename(filepath)
+    df["account"] = _build_account_labels(df, filepath)
 
     df["type"] = "DIVIDEND"
     df.loc[df["action"].str.contains("REINVESTMENT", na=False), "type"] = "REINVESTMENT"
