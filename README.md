@@ -37,6 +37,82 @@ venv/bin/pip install -r requirements.txt
 venv/bin/python cli.py setup-db
 ```
 
+## Gmail Integration
+The Gmail integration is read-only in this first pass. It authenticates with Gmail using OAuth,
+reads messages from a specific label/folder, and stages message metadata into `reports/` for review.
+
+Recommended secret file locations:
+- `secrets/google_credentials.json`
+- `secrets/google_token.json`
+
+One-time auth:
+```bash
+venv/bin/python cli.py gmail-auth \
+  --credentials-path secrets/google_credentials.json \
+  --token-path secrets/google_token.json
+```
+
+Stage messages from a Gmail label:
+```bash
+venv/bin/python cli.py import-gmail \
+  --label "Dividend Alerts" \
+  --query "is:unread newer_than:30d" \
+  --max-results 50 \
+  --credentials-path secrets/google_credentials.json \
+  --token-path secrets/google_token.json
+```
+
+This writes review artifacts under `reports/`:
+- `gmail_<label>_<timestamp>.csv`
+- `gmail_<label>_<timestamp>.jsonl`
+
+Notes:
+- scope is Gmail read-only only
+- OAuth credentials and token files are ignored by git
+- this does not import anything into the DB yet
+- the next step after review is to add a parser for your specific dividend email format
+
+### Simpler Gmail option: IMAP + app password
+If you want a simpler setup first, you can use Gmail IMAP with an app password instead of OAuth.
+
+Google notes that app passwords are not recommended and require 2-Step Verification:
+- https://support.google.com/mail/answer/1173270?hl=en
+- https://support.google.com/accounts/answer/2461835?hl=en
+
+Put the app password in:
+- `secrets/gmail_app_password.txt`
+
+Then stage messages from a Gmail mailbox/folder:
+```bash
+venv/bin/python cli.py import-gmail-imap \
+  --username yourname@gmail.com \
+  --mailbox "Dividend Alerts" \
+  --search 'ALL' \
+  --max-results 50 \
+  --include-body
+```
+
+You can also use Gmail raw search through IMAP on Gmail accounts, for example:
+```bash
+venv/bin/python cli.py import-gmail-imap \
+  --username yourname@gmail.com \
+  --mailbox "[Gmail]/All Mail" \
+  --search 'X-GM-RAW "label:Dividend-Alerts newer_than:30d"' \
+  --max-results 50 \
+  --include-body
+```
+
+Import the reviewed parsed Gmail transactions into the DB:
+```bash
+venv/bin/python cli.py import-gmail-parsed \
+  --path reports/gmail_imap_gmail_all_mail_YYYYMMDD_HHMMSS_parsed_transactions.csv
+```
+
+Notes:
+- this uses the payment date extracted from the email body, not the email received timestamp
+- by default it skips parsed `INTEREST` rows
+- if a row already exists with the same account/security/amount on a different date, the importer updates the DB row to the email payment date
+
 ## Web UI
 ```bash
 # Local read-only dashboard

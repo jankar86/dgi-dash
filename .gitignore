@@ -167,3 +167,5 @@ data/**/*.xlsx
 data/**/*.xls
 dividends.db
 backups/*.sql
+secrets/
+*.token.json
