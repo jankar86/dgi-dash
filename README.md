@@ -102,6 +102,17 @@ venv/bin/python cli.py import-gmail-imap \
   --include-body
 ```
 
+If you want the staged messages marked as read after the files are written:
+```bash
+venv/bin/python cli.py import-gmail-imap \
+  --username yourname@gmail.com \
+  --mailbox "[Gmail]/All Mail" \
+  --search 'X-GM-RAW "label:Dividend-Alerts is:unread"' \
+  --max-results 50 \
+  --include-body \
+  --mark-read
+```
+
 Import the reviewed parsed Gmail transactions into the DB:
 ```bash
 venv/bin/python cli.py import-gmail-parsed \

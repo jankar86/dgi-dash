@@ -236,6 +236,11 @@ def build_parser():
         action="store_true",
         help="Include decoded plain-text bodies in the staged JSONL output",
     )
+    gmail_imap_parser.add_argument(
+        "--mark-read",
+        action="store_true",
+        help="Mark successfully staged Gmail messages as read after processing",
+    )
 
     gmail_import_parsed_parser = subparsers.add_parser(
         "import-gmail-parsed",
@@ -374,6 +379,7 @@ def main(argv=None):
             max_results=args.max_results,
             report_dir=args.report_dir,
             include_body=args.include_body,
+            mark_read=args.mark_read,
         )
         return 0
 

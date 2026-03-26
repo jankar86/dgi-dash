@@ -206,12 +206,14 @@ def stage_gmail_imap(
     report_dir=DEFAULT_GMAIL_REPORT_DIR,
     include_body=False,
     db_path=DEFAULT_DB_PATH,
+    mark_read=False,
 ):
     password = _load_app_password(app_password, app_password_file)
     imap = imaplib.IMAP4_SSL(GMAIL_IMAP_HOST, GMAIL_IMAP_PORT)
+    processed_uids = []
     try:
         imap.login(username, password)
-        status, _ = imap.select(f'"{mailbox}"', readonly=True)
+        status, _ = imap.select(f'"{mailbox}"', readonly=not mark_read)
         if status != "OK":
             raise RuntimeError(f"Unable to select mailbox: {mailbox!r}")
 
@@ -244,76 +246,85 @@ def stage_gmail_imap(
                     include_body=include_body,
                 )
             )
+            processed_uids.append(uid)
+
+        report_root = Path(report_dir)
+        report_root.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        mailbox_stub = _sanitize_mailbox_name(mailbox)
+        csv_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}.csv"
+        jsonl_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}.jsonl"
+        parsed_csv_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}_parsed_transactions.csv"
+
+        fieldnames = [
+            "message_uid",
+            "message_id",
+            "header_date",
+            "from",
+            "to",
+            "subject",
+            "snippet",
+        ]
+        if include_body:
+            fieldnames.append("plain_text_body")
+
+        with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(records)
+
+        with jsonl_path.open("w", encoding="utf-8") as jsonl_file:
+            for record in records:
+                persisted = {k: v for k, v in record.items() if k != "_body_text"}
+                jsonl_file.write(json.dumps(persisted, ensure_ascii=True))
+                jsonl_file.write("\n")
+
+        parsed_rows = []
+        for record in records:
+            parsed_rows.extend(_extract_etrade_alert_transactions(record))
+        parsed_rows = _enrich_with_db_match_status(parsed_rows, db_path)
+
+        parsed_fieldnames = [
+            "message_uid",
+            "message_id",
+            "header_date",
+            "account",
+            "date",
+            "security_name",
+            "raw_symbol",
+            "security",
+            "amount",
+            "txn_type",
+            "db_match_status",
+            "db_exact_match_count",
+            "db_same_amount_match_count",
+            "db_same_amount_dates",
+            "subject",
+            "notes",
+        ]
+        with parsed_csv_path.open("w", encoding="utf-8", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=parsed_fieldnames)
+            writer.writeheader()
+            writer.writerows(parsed_rows)
+
+        marked_read = 0
+        if mark_read and processed_uids:
+            for uid in processed_uids:
+                status, _ = imap.store(uid, "+FLAGS", r"(\Seen)")
+                if status == "OK":
+                    marked_read += 1
+
+        print(
+            f"event=gmail_imap_stage_complete mailbox={mailbox!r} search={search!r} "
+            f"count={len(records)} csv={csv_path} jsonl={jsonl_path} "
+            f"parsed_csv={parsed_csv_path} marked_read={marked_read}"
+        )
     finally:
         try:
             imap.close()
         except Exception:
             pass
         imap.logout()
-
-    report_root = Path(report_dir)
-    report_root.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    mailbox_stub = _sanitize_mailbox_name(mailbox)
-    csv_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}.csv"
-    jsonl_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}.jsonl"
-    parsed_csv_path = report_root / f"gmail_imap_{mailbox_stub}_{timestamp}_parsed_transactions.csv"
-
-    fieldnames = [
-        "message_uid",
-        "message_id",
-        "header_date",
-        "from",
-        "to",
-        "subject",
-        "snippet",
-    ]
-    if include_body:
-        fieldnames.append("plain_text_body")
-
-    with csv_path.open("w", encoding="utf-8", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(records)
-
-    with jsonl_path.open("w", encoding="utf-8") as jsonl_file:
-        for record in records:
-            persisted = {k: v for k, v in record.items() if k != "_body_text"}
-            jsonl_file.write(json.dumps(persisted, ensure_ascii=True))
-            jsonl_file.write("\n")
-
-    parsed_rows = []
-    for record in records:
-        parsed_rows.extend(_extract_etrade_alert_transactions(record))
-    parsed_rows = _enrich_with_db_match_status(parsed_rows, db_path)
-
-    parsed_fieldnames = [
-        "message_uid",
-        "message_id",
-        "header_date",
-        "account",
-        "date",
-        "security_name",
-        "raw_symbol",
-        "security",
-        "amount",
-        "txn_type",
-        "db_match_status",
-        "db_exact_match_count",
-        "db_same_amount_match_count",
-        "db_same_amount_dates",
-        "subject",
-        "notes",
-    ]
-    with parsed_csv_path.open("w", encoding="utf-8", newline="") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=parsed_fieldnames)
-        writer.writeheader()
-        writer.writerows(parsed_rows)
-
-    print(
-        f"event=gmail_imap_stage_complete mailbox={mailbox!r} search={search!r} "
-        f"count={len(records)} csv={csv_path} jsonl={jsonl_path} parsed_csv={parsed_csv_path}"
-    )
 
 
 def import_parsed_gmail_transactions(path, *, db_url=DEFAULT_DB_PATH, skip_interest=True):
