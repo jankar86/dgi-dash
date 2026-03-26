@@ -23,6 +23,7 @@ class TxnType(enum.Enum):
     BUY = "BUY"
     SELL = "SELL"
     DIVIDEND = "DIVIDEND"
+    CAPITAL_GAIN_DISTRIBUTION = "CAPITAL_GAIN_DISTRIBUTION"
     REINVESTMENT = "REINVESTMENT"
 
 
@@ -55,7 +56,7 @@ class Transaction(Base):
 
     account_id = Column(Integer, ForeignKey("accounts.id"))
     security_id = Column(Integer, ForeignKey("securities.id"))
-    txn_type = Column(Enum(TxnType, native_enum=False, length=20), nullable=False)
+    txn_type = Column(Enum(TxnType, native_enum=False, length=32), nullable=False)
     date = Column(Date, nullable=False)
     quantity = Column(Numeric(20, 6), nullable=False, default=0)
     price = Column(Numeric(20, 6), nullable=False, default=0)
@@ -66,6 +67,8 @@ class Transaction(Base):
     source_file = Column(String(255))
     source_row_hash = Column(String(64), unique=True)
     raw_action = Column(String(128))
+    reporting_tag = Column(String(64))
+    annotation_note = Column(String(255))
     imported_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     account = relationship("Account", back_populates="transactions")

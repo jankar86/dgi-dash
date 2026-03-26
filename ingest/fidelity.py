@@ -10,6 +10,11 @@ from db.utils import (
 
 session = create_session()
 
+FIDELITY_SYMBOL_ALIASES = {
+    "92556H206": "PARA",
+    "92556H305": "PARAP",
+}
+
 
 def is_fidelity_format(df):
     cols = set(df.columns)
@@ -70,7 +75,12 @@ def load_fidelity_csv(filepath):
     df["amount"] = pd.to_numeric(df["amount ($)"].str.replace(",", "").str.strip(), errors="coerce").fillna(0)
     df["quantity"] = pd.to_numeric(df["quantity"].str.strip(), errors="coerce").fillna(0)
     df["price"] = pd.to_numeric(df["price ($)"].str.strip(), errors="coerce").fillna(0)
-    df["symbol"] = df["symbol"].str.strip().fillna("UNKNOWN")
+    df["symbol"] = (
+        df["symbol"]
+        .str.strip()
+        .fillna("UNKNOWN")
+        .replace(FIDELITY_SYMBOL_ALIASES)
+    )
     df["is_qualified"] = False
 
     df["account"] = _build_account_labels(df, filepath)

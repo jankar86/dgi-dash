@@ -1,12 +1,14 @@
 from datetime import date, datetime
 
-from sqlalchemy import create_engine, func
+from sqlalchemy import Integer, create_engine, func
 from sqlalchemy.orm import sessionmaker
 
 from db.models import Account, Security, Transaction, TxnType
 
 
 DEFAULT_DB_URL = "sqlite:///dividends.db"
+MONTH_LABELS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
+INCOME_TXN_TYPES = (TxnType.DIVIDEND, TxnType.CAPITAL_GAIN_DISTRIBUTION)
 
 
 def _session(db_url=DEFAULT_DB_URL):
@@ -20,6 +22,29 @@ def _parse_date(value):
     if isinstance(value, date):
         return value
     return datetime.strptime(str(value), "%Y-%m-%d").date()
+
+
+def _pct_change(current, prior):
+    if current is None or prior in (None, 0):
+        return None
+    return ((current - prior) / prior) * 100.0
+
+
+def _round_money(value):
+    if value is None:
+        return None
+    return round(float(value), 2)
+
+
+def _income_type_values(mode):
+    normalized = (mode or "dividends").lower()
+    if normalized == "combined":
+        return [txn.value for txn in INCOME_TXN_TYPES]
+    if normalized == "dividends":
+        return [TxnType.DIVIDEND.value]
+    if normalized == "interest":
+        return [TxnType.DIVIDEND.value]
+    return [TxnType.DIVIDEND.value]
 
 
 def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
@@ -78,7 +103,9 @@ def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
                 func.strftime("%Y-%m", Transaction.date).label("month"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
             )
-            .filter(Transaction.txn_type == TxnType.DIVIDEND)
+            .filter(Transaction.txn_type.in_(INCOME_TXN_TYPES))
+            .filter(Security.ticker != "INTEREST")
+            .join(Security, Security.id == Transaction.security_id)
             .filter(func.strftime("%Y", Transaction.date) == str(current_year))
             .group_by("month")
             .order_by("month")
@@ -92,6 +119,10 @@ def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
         account_totals = (
             session.query(
                 Account.name.label("account"),
+                Account.display_name.label("display_name"),
+                Account.institution.label("institution"),
+                Account.tax_treatment.label("tax_treatment"),
+                Account.account_group.label("account_group"),
                 func.coalesce(func.sum(Transaction.amount), 0).label("total"),
                 func.max(Transaction.date).label("last_date"),
                 func.count(Transaction.id).label("txn_count"),
@@ -99,13 +130,23 @@ def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
             .join(Transaction, Transaction.account_id == Account.id)
             .filter(Transaction.txn_type == TxnType.DIVIDEND)
             .filter(func.strftime("%Y", Transaction.date) == str(current_year))
-            .group_by(Account.name)
+            .group_by(
+                Account.name,
+                Account.display_name,
+                Account.institution,
+                Account.tax_treatment,
+                Account.account_group,
+            )
             .order_by(func.sum(Transaction.amount).desc(), Account.name)
             .all()
         )
         account_totals = [
             {
                 "account": row.account,
+                "display_name": row.display_name,
+                "institution": row.institution,
+                "tax_treatment": row.tax_treatment,
+                "account_group": row.account_group,
                 "total": float(row.total),
                 "last_date": row.last_date,
                 "txn_count": int(row.txn_count),
@@ -147,6 +188,7 @@ def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
             limit=20,
         )["rows"]
         import_status = get_import_status(db_url=db_url)
+        expected_remainder = get_expected_remainder(db_url=db_url)
 
         return {
             "as_of": max_date,
@@ -165,6 +207,81 @@ def get_dashboard_data(db_url=DEFAULT_DB_URL, year=None):
             "top_securities": top_securities,
             "recent_transactions": recent_transactions,
             "import_status": import_status,
+            "expected_remainder": expected_remainder,
+        }
+    finally:
+        session.close()
+
+
+def get_expected_remainder(db_url=DEFAULT_DB_URL, as_of_date=None, lookback_years=3):
+    session = _session(db_url=db_url)
+    try:
+        as_of = _parse_date(as_of_date) if as_of_date else date.today()
+        comparison_years = [str(y) for y in range(as_of.year - lookback_years, as_of.year)]
+        if not comparison_years:
+            return {"as_of": as_of, "rows": [], "total_estimate": 0.0}
+
+        rows = (
+            session.query(
+                func.strftime("%Y", Transaction.date).label("year"),
+                func.strftime("%d", Transaction.date).label("day"),
+                Security.ticker.label("security"),
+                Account.name.label("account"),
+                func.sum(Transaction.amount).label("amount"),
+            )
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Security, Security.id == Transaction.security_id)
+            .filter(
+                Transaction.txn_type == TxnType.DIVIDEND,
+                Security.ticker != "INTEREST",
+                func.strftime("%m", Transaction.date) == f"{as_of.month:02d}",
+                func.strftime("%Y", Transaction.date).in_(comparison_years),
+                func.cast(func.strftime("%d", Transaction.date), Integer) > as_of.day,
+            )
+            .group_by("year", "day", "security", "account")
+            .order_by("day", "security", "account", "year")
+            .all()
+        )
+
+        grouped = {}
+        for row in rows:
+            key = (int(row.day), row.security, row.account)
+            grouped.setdefault(key, {})[int(row.year)] = _round_money(row.amount)
+
+        expected_rows = []
+        for (day, security, account), yearly_amounts in sorted(grouped.items()):
+            amounts = [amount for _, amount in sorted(yearly_amounts.items())]
+            observed_years = sorted(yearly_amounts)
+            last_observed_year = observed_years[-1] if observed_years else None
+            previous_observed_year = observed_years[-2] if len(observed_years) >= 2 else None
+            last_observed_amount = yearly_amounts.get(last_observed_year) if last_observed_year else None
+            previous_observed_amount = (
+                yearly_amounts.get(previous_observed_year) if previous_observed_year else None
+            )
+            expected_rows.append(
+                {
+                    "day": day,
+                    "security": security,
+                    "account": account,
+                    "expected_amount": _round_money(sum(amounts) / len(amounts)),
+                    "years_seen": len(amounts),
+                    "last_observed_year": last_observed_year,
+                    "last_observed_amount": last_observed_amount,
+                    "previous_observed_year": previous_observed_year,
+                    "previous_observed_amount": previous_observed_amount,
+                    "trend_pct": _pct_change(
+                        last_observed_amount,
+                        previous_observed_amount,
+                    ),
+                }
+            )
+
+        total_estimate = _round_money(sum(row["expected_amount"] for row in expected_rows))
+        return {
+            "as_of": as_of,
+            "rows": expected_rows,
+            "total_estimate": total_estimate,
+            "comparison_years": comparison_years,
         }
     finally:
         session.close()
@@ -189,12 +306,15 @@ def get_transactions(
                 Transaction.date,
                 Security.ticker.label("security"),
                 Account.name.label("account"),
+                Account.display_name.label("account_display_name"),
                 Transaction.txn_type,
                 Transaction.amount,
                 Transaction.is_qualified,
                 Transaction.source_system,
                 Transaction.source_file,
                 Transaction.raw_action,
+                Transaction.reporting_tag,
+                Transaction.annotation_note,
             )
             .join(Account, Account.id == Transaction.account_id)
             .join(Security, Security.id == Transaction.security_id)
@@ -249,6 +369,7 @@ def get_transactions(
                     "date": row.date,
                     "security": row.security,
                     "account": row.account,
+                    "account_display_name": row.account_display_name,
                     "txn_type": row.txn_type.value if hasattr(row.txn_type, "value") else str(row.txn_type),
                     "amount": float(row.amount),
                     "is_qualified": bool(row.is_qualified),
@@ -343,6 +464,176 @@ def get_import_status(db_url=DEFAULT_DB_URL):
         }
     finally:
         session.close()
+
+
+def get_accounts_directory(db_url=DEFAULT_DB_URL):
+    session = _session(db_url=db_url)
+    try:
+        rows = (
+            session.query(
+                Account.name.label("account"),
+                Account.display_name.label("display_name"),
+                Account.institution.label("institution"),
+                Account.tax_treatment.label("tax_treatment"),
+                Account.account_group.label("account_group"),
+                Account.is_active.label("is_active"),
+                func.count(Transaction.id).label("txn_count"),
+                func.coalesce(func.sum(Transaction.amount), 0).label("total_amount"),
+                func.max(Transaction.date).label("last_date"),
+            )
+            .outerjoin(Transaction, Transaction.account_id == Account.id)
+            .group_by(
+                Account.name,
+                Account.display_name,
+                Account.institution,
+                Account.tax_treatment,
+                Account.account_group,
+                Account.is_active,
+            )
+            .order_by(Account.is_active.desc(), Account.name.asc())
+            .all()
+        )
+
+        return [
+            {
+                "account": row.account,
+                "display_name": row.display_name,
+                "institution": row.institution,
+                "tax_treatment": row.tax_treatment,
+                "account_group": row.account_group,
+                "is_active": bool(row.is_active),
+                "txn_count": int(row.txn_count or 0),
+                "total_amount": float(row.total_amount or 0),
+                "last_date": row.last_date,
+            }
+            for row in rows
+        ]
+    finally:
+        session.close()
+
+
+def get_monthly_income_report(
+    *,
+    db_url=DEFAULT_DB_URL,
+    income_mode="dividends",
+    tax_treatment=None,
+):
+    session = _session(db_url=db_url)
+    try:
+        query = (
+            session.query(
+                Transaction.date.label("date"),
+                Transaction.amount.label("amount"),
+                Account.tax_treatment.label("tax_treatment"),
+                Security.ticker.label("security"),
+                Transaction.txn_type.label("txn_type"),
+            )
+            .join(Account, Account.id == Transaction.account_id)
+            .join(Security, Security.id == Transaction.security_id)
+            .filter(Transaction.date.isnot(None))
+        )
+
+        mode = (income_mode or "dividends").lower()
+        if mode == "dividends":
+            query = query.filter(Transaction.txn_type == TxnType.DIVIDEND)
+            query = query.filter(Security.ticker != "INTEREST")
+        elif mode == "interest":
+            query = query.filter(Transaction.txn_type == TxnType.DIVIDEND)
+            query = query.filter(Security.ticker == "INTEREST")
+        else:
+            mode = "combined"
+            query = query.filter(Transaction.txn_type.in_(INCOME_TXN_TYPES))
+
+        if tax_treatment:
+            query = query.filter(Account.tax_treatment == tax_treatment)
+
+        rows = query.order_by(Transaction.date.asc()).all()
+        if not rows:
+            return {
+                "income_mode": mode,
+                "tax_treatment": tax_treatment or "",
+                "available_tax_treatments": _get_tax_treatments(session),
+                "years": [],
+                "month_labels": MONTH_LABELS,
+                "monthly_matrix": [],
+                "annual_totals": {},
+                "avg_monthly": {},
+                "annual_yoy": {},
+                "rolling_three_month": [],
+            }
+
+        monthly_totals = {}
+        for row in rows:
+            year = row.date.year
+            month = row.date.month
+            monthly_totals[(year, month)] = monthly_totals.get((year, month), 0.0) + float(row.amount or 0)
+
+        years = sorted({year for year, _month in monthly_totals})
+
+        monthly_matrix = []
+        for month in range(1, 13):
+            month_entry = {"month": month, "label": MONTH_LABELS[month - 1], "values": {}}
+            for year in years:
+                month_entry["values"][year] = monthly_totals.get((year, month), 0.0)
+            monthly_matrix.append(month_entry)
+
+        annual_totals = {
+            year: sum(monthly_totals.get((year, month), 0.0) for month in range(1, 13))
+            for year in years
+        }
+        avg_monthly = {
+            year: annual_totals[year] / 12.0
+            for year in years
+        }
+
+        annual_yoy = {}
+        previous_year = None
+        for year in years:
+            if previous_year is None or annual_totals.get(previous_year, 0) == 0:
+                annual_yoy[year] = None
+            else:
+                annual_yoy[year] = (annual_totals[year] - annual_totals[previous_year]) / annual_totals[previous_year]
+            previous_year = year
+
+        chronological = [(year, month, monthly_totals.get((year, month), 0.0)) for year in years for month in range(1, 13)]
+        rolling_map = {}
+        for idx, (year, month, _value) in enumerate(chronological):
+            window = [entry[2] for entry in chronological[max(0, idx - 2): idx + 1]]
+            rolling_map[(year, month)] = sum(window) / len(window) if window else 0.0
+
+        rolling_three_month = []
+        for month in range(1, 13):
+            row = {"month": month, "label": MONTH_LABELS[month - 1], "values": {}}
+            for year in years:
+                row["values"][year] = rolling_map.get((year, month), 0.0)
+            rolling_three_month.append(row)
+
+        return {
+            "income_mode": mode,
+            "tax_treatment": tax_treatment or "",
+            "available_tax_treatments": _get_tax_treatments(session),
+            "years": years,
+            "month_labels": MONTH_LABELS,
+            "monthly_matrix": monthly_matrix,
+            "annual_totals": annual_totals,
+            "avg_monthly": avg_monthly,
+            "annual_yoy": annual_yoy,
+            "rolling_three_month": rolling_three_month,
+        }
+    finally:
+        session.close()
+
+
+def _get_tax_treatments(session):
+    return [
+        row[0]
+        for row in session.query(Account.tax_treatment)
+        .filter(Account.tax_treatment.isnot(None))
+        .distinct()
+        .order_by(Account.tax_treatment.asc())
+        .all()
+        if row[0]
+    ]
 
 
 def get_account_detail(account_name, db_url=DEFAULT_DB_URL):

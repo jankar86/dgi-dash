@@ -14,6 +14,13 @@ def _money(value):
     return f"${value:,.2f}"
 
 
+def _pct(value):
+    if value is None:
+        return ""
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.1f}%"
+
+
 def _text(value):
     if value is None:
         return ""
@@ -30,6 +37,13 @@ def _security_href(security):
 
 def _dashboard_href(year=None):
     return "/" if not year else f"/?year={quote(str(year), safe='')}"
+
+
+def _account_label(display_name, account):
+    primary = _text(display_name or account)
+    if display_name and display_name != account:
+        return f"{primary}<div class='subtle'>{_text(account)}</div>"
+    return primary
 
 
 def _render_monthly_chart(monthly_income):
@@ -120,6 +134,10 @@ def _base_page(title, body):
     th {{ color: var(--muted); font-size: 0.92rem; }}
     .money {{ text-align: right; font-variant-numeric: tabular-nums; }}
     .tag {{ display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: #f5f1e8; font-size: 0.85rem; }}
+    .meta-tags {{ display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }}
+    .subtle {{ color: var(--muted); font-size: 0.84rem; margin-top: 2px; }}
+    .delta-pos {{ color: #1d6b52; font-weight: 600; }}
+    .delta-neg {{ color: #9d3d2f; font-weight: 600; }}
     .compact-table {{ table-layout: fixed; }}
     .compact-table th, .compact-table td {{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }}
     .compact-table .col-date {{ width: 96px; }}
@@ -129,6 +147,16 @@ def _base_page(title, body):
     .compact-table .col-amount {{ width: 105px; }}
     .compact-table .col-qualified {{ width: 86px; }}
     .compact-table .col-source {{ width: 110px; }}
+    .report-wrap {{ overflow-x: auto; }}
+    .report-table {{ min-width: 1220px; table-layout: fixed; font-size: 0.94rem; }}
+    .report-table th, .report-table td {{ white-space: nowrap; padding: 10px 12px; border-right: 1px solid var(--line); }}
+    .report-table th:last-child, .report-table td:last-child {{ border-right: none; }}
+    .report-table thead th {{ position: sticky; top: 0; background: #f7f1e5; z-index: 1; }}
+    .report-table tbody tr:nth-child(even) td {{ background: rgba(255,255,255,0.35); }}
+    .report-table td:first-child, .report-table th:first-child {{ position: sticky; left: 0; background: #fffaf1; z-index: 1; min-width: 140px; }}
+    .report-table thead th:first-child {{ background: #f7f1e5; z-index: 2; }}
+    .summary-row td {{ background: #f4ede0; font-weight: 600; }}
+    .total-row td {{ background: #ece3d2; font-weight: 700; border-top: 2px solid var(--line); }}
     .compact-table .col-action {{ width: 140px; }}
     .compact-table .col-file {{ width: 320px; }}
     .path {{ display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 0.88rem; }}
@@ -157,6 +185,7 @@ def _base_page(title, body):
       </div>
       <div class="nav">
         <a href="/">Dashboard</a>
+        <a href="/reports/monthly-income">Monthly</a>
         <a href="/accounts">Accounts</a>
         <a href="/securities">Securities</a>
         <a href="/transactions">Transactions</a>
@@ -202,7 +231,7 @@ def render_dashboard(params=None, db_url=DEFAULT_DB_URL):
             )
 
     account_rows = "".join(
-        f"<tr><td><a href='{_account_href(row['account'])}'>{_text(row['account'])}</a></td><td class='money'>{_money(row['total'])}</td><td>{_text(row['last_date'])}</td><td>{row['txn_count']}</td></tr>"
+        f"<tr><td><a href='{_account_href(row['account'])}'>{_account_label(row.get('display_name'), row['account'])}</a></td><td>{_text(row.get('tax_treatment'))}</td><td>{_text(row.get('institution'))}</td><td class='money'>{_money(row['total'])}</td><td>{_text(row['last_date'])}</td><td>{row['txn_count']}</td></tr>"
         for row in data["account_totals"]
     )
     security_rows = "".join(
@@ -210,7 +239,7 @@ def render_dashboard(params=None, db_url=DEFAULT_DB_URL):
         for row in data["top_securities"]
     )
     recent_rows = "".join(
-        f"<tr><td>{_text(row['date'])}</td><td><a href='{_security_href(row['security'])}'>{_text(row['security'])}</a></td><td><a href='{_account_href(row['account'])}'>{_text(row['account'])}</a></td><td><span class='tag'>{_text(row['txn_type'])}</span></td><td class='money'>{_money(row['amount'])}</td><td>{_text(row['source_system'])}</td></tr>"
+        f"<tr><td>{_text(row['date'])}</td><td><a href='{_security_href(row['security'])}'>{_text(row['security'])}</a></td><td><a href='{_account_href(row['account'])}'>{_account_label(row.get('account_display_name'), row['account'])}</a></td><td><span class='tag'>{_text(row['txn_type'])}</span></td><td class='money'>{_money(row['amount'])}</td><td>{_text(row['source_system'])}</td></tr>"
         for row in data["recent_transactions"]
     )
     source_rows = "".join(
@@ -220,6 +249,19 @@ def render_dashboard(params=None, db_url=DEFAULT_DB_URL):
     coverage_rows = "".join(
         f"<tr><td><a href='{_account_href(row['account'])}'>{_text(row['account'])}</a></td><td>{_text(row['last_date'])}</td><td>{'' if row['days_since_last'] is None else row['days_since_last']}</td><td>{row['txn_count']}</td></tr>"
         for row in data["import_status"]["coverage"]
+    )
+    expected_rows = "".join(
+        f"<tr>"
+        f"<td>{row['day']}</td>"
+        f"<td><a href='{_security_href(row['security'])}'>{_text(row['security'])}</a></td>"
+        f"<td><a href='{_account_href(row['account'])}'>{_text(row['account'])}</a></td>"
+        f"<td class='money'>{_money(row['last_observed_amount']) if row['last_observed_amount'] is not None else ''}</td>"
+        f"<td>{_text(str(row['last_observed_year']) + ' vs ' + str(row['previous_observed_year'])) if row['previous_observed_year'] else ''}</td>"
+        f"<td class='{'delta-pos' if (row['trend_pct'] or 0) >= 0 else 'delta-neg'}'>{_pct(row['trend_pct'])}</td>"
+        f"<td class='money'>{_money(row['expected_amount'])}</td>"
+        f"<td>{row['years_seen']}</td>"
+        f"</tr>"
+        for row in data["expected_remainder"]["rows"]
     )
 
     body = f"""
@@ -243,7 +285,7 @@ def render_dashboard(params=None, db_url=DEFAULT_DB_URL):
       <div class="card side">
         <h3>Largest Accounts</h3>
         <table>
-          <thead><tr><th>Account</th><th class="money">Total</th><th>Last Date</th><th>Txns</th></tr></thead>
+          <thead><tr><th>Account</th><th>Tax</th><th>Inst.</th><th class="money">Total</th><th>Last Date</th><th>Txns</th></tr></thead>
           <tbody>{account_rows}</tbody>
         </table>
       </div>
@@ -277,6 +319,14 @@ def render_dashboard(params=None, db_url=DEFAULT_DB_URL):
           <tbody>{coverage_rows}</tbody>
         </table>
       </div>
+      <div class="card full">
+        <h3>Expected Remainder Of Month</h3>
+        <p>Baseline uses the last observed payment pattern after day {data['expected_remainder']['as_of'].day}. The 3Y average is shown as a secondary smoothing reference. Estimated remainder by 3Y average: <strong>{_money(data['expected_remainder']['total_estimate'])}</strong>.</p>
+        <table>
+          <thead><tr><th>Day</th><th>Security</th><th>Account</th><th class="money">Baseline</th><th>Trend Basis</th><th>% Change</th><th class="money">3Y Avg</th><th>Years</th></tr></thead>
+          <tbody>{expected_rows or "<tr><td colspan='8'>No historical end-of-month pattern found.</td></tr>"}</tbody>
+        </table>
+      </div>
     </div>
     """
     return _base_page("dgi-dash dashboard", body)
@@ -301,9 +351,7 @@ def render_transactions(params, db_url=DEFAULT_DB_URL):
         f"<td class='col-type' title='{_text(row['txn_type'])}'>{_text(row['txn_type'])}</td>"
         f"<td class='money col-amount' title='{_money(row['amount'])}'>{_money(row['amount'])}</td>"
         f"<td class='col-qualified' title='{'yes' if row['is_qualified'] else ''}'>{'yes' if row['is_qualified'] else ''}</td>"
-        f"<td class='col-source' title='{_text(row['source_system'])}'>{_text(row['source_system'])}</td>"
-        f"<td class='col-action' title='{_text(row['raw_action'])}'>{_text(row['raw_action'])}</td>"
-        f"<td class='col-file' title='{_text(row['source_file'])}'><span class='path'>{_text(row['source_file'])}</span></td>"
+        f"<td class='col-source' title='source={_text(row['source_system'])}&#10;action={_text(row['raw_action'])}&#10;file={_text(row['source_file'])}&#10;tag={_text(row.get('reporting_tag'))}&#10;note={_text(row.get('annotation_note'))}'>{_text(row['source_system'])}</td>"
         f"</tr>"
         for row in data["rows"]
     )
@@ -340,7 +388,7 @@ def render_transactions(params, db_url=DEFAULT_DB_URL):
     body = f"""
     <div class="hero">
       <h2>Transactions</h2>
-      <p>Filter the read-only transaction table by account, security, year, and type.</p>
+      <p>Filter the read-only transaction table by account, security, year, and type. Source provenance is still available on hover.</p>
     </div>
     <div class="card full">
       <form method="get" action="/transactions">
@@ -361,7 +409,7 @@ def render_transactions(params, db_url=DEFAULT_DB_URL):
       <table class="compact-table">
         <thead>
           <tr>
-            <th class='col-date'>{sort_label('date', 'Date')}</th><th class='col-security'>{sort_label('security', 'Security')}</th><th class='col-account'>{sort_label('account', 'Account')}</th><th class='col-type'>{sort_label('txn_type', 'Type')}</th><th class="money col-amount">{sort_label('amount', 'Amount')}</th><th class='col-qualified'>{sort_label('qualified', 'Qualified')}</th><th class='col-source'>{sort_label('source_system', 'Source')}</th><th class='col-action'>{sort_label('raw_action', 'Raw Action')}</th><th class='col-file'>{sort_label('source_file', 'Source File')}</th>
+            <th class='col-date'>{sort_label('date', 'Date')}</th><th class='col-security'>{sort_label('security', 'Security')}</th><th class='col-account'>{sort_label('account', 'Account')}</th><th class='col-type'>{sort_label('txn_type', 'Type')}</th><th class="money col-amount">{sort_label('amount', 'Amount')}</th><th class='col-qualified'>{sort_label('qualified', 'Qualified')}</th><th class='col-source'>{sort_label('source_system', 'Source')}</th>
           </tr>
         </thead>
         <tbody>{rows_html}</tbody>
@@ -372,19 +420,19 @@ def render_transactions(params, db_url=DEFAULT_DB_URL):
 
 
 def render_accounts(db_url=DEFAULT_DB_URL):
-    data = dashboard_data.get_dashboard_data(db_url=db_url)
+    data = dashboard_data.get_accounts_directory(db_url=db_url)
     rows = "".join(
-        f"<tr><td><a href='{_account_href(row['account'])}'>{_text(row['account'])}</a></td><td class='money'>{_money(row['total'])}</td><td>{row['txn_count']}</td><td>{_text(row['last_date'])}</td></tr>"
-        for row in data["account_totals"]
+        f"<tr><td><a href='{_account_href(row['account'])}'>{_account_label(row.get('display_name'), row['account'])}</a></td><td>{_text(row.get('tax_treatment'))}</td><td>{_text(row.get('institution'))}</td><td>{_text(row.get('account_group'))}</td><td>{'yes' if row.get('is_active') else 'no'}</td><td class='money'>{_money(row['total_amount'])}</td><td>{row['txn_count']}</td><td>{_text(row['last_date'])}</td></tr>"
+        for row in data
     )
     body = f"""
     <div class="hero">
       <h2>Accounts</h2>
-      <p>Read-only account summary and drill-down entrypoint.</p>
+      <p>Account directory and drill-down entrypoint, including inactive and legacy accounts.</p>
     </div>
     <div class="card full">
       <table>
-        <thead><tr><th>Account</th><th class="money">Dividend Total</th><th>Txns</th><th>Last Date</th></tr></thead>
+        <thead><tr><th>Account</th><th>Tax</th><th>Inst.</th><th>Group</th><th>Active</th><th class="money">Total</th><th>Txns</th><th>Last Date</th></tr></thead>
         <tbody>{rows}</tbody>
       </table>
     </div>
@@ -425,6 +473,12 @@ def render_account_detail(account_name, db_url=DEFAULT_DB_URL):
     body = f"""
     <div class="hero">
       <h2>{_text(data['metadata']['display_name'] or data['account'])}</h2>
+      <div class="meta-tags">
+        <span class="tag">{_text(data['account'])}</span>
+        <span class="tag">{_text(data['metadata']['institution'])}</span>
+        <span class="tag">{_text(data['metadata']['account_group'])}</span>
+        <span class="tag">{_text(data['metadata']['tax_treatment'])}</span>
+      </div>
       <p>From {_text(data['summary']['first_date'])} through {_text(data['summary']['last_date'])}, this account has {data['summary']['txn_count']} transactions totaling {_money(data['summary']['total_amount'])}.</p>
     </div>
     <div class="grid">
@@ -458,6 +512,125 @@ def render_account_detail(account_name, db_url=DEFAULT_DB_URL):
     </div>
     """
     return _base_page(f"dgi-dash account {data['account']}", body)
+
+
+def render_monthly_income_report(params, db_url=DEFAULT_DB_URL):
+    income_mode = params.get("income_mode", ["combined"])[0] or "combined"
+    tax_treatment = params.get("tax_treatment", [""])[0] or None
+    data = dashboard_data.get_monthly_income_report(
+        db_url=db_url,
+        income_mode=income_mode,
+        tax_treatment=tax_treatment,
+    )
+
+    def options(items, selected, include_all=True):
+        html_items = ["<option value=''>All</option>"] if include_all else []
+        for item in items:
+            sel = " selected" if str(item) == str(selected) else ""
+            html_items.append(f"<option value='{_text(item)}'{sel}>{_text(item)}</option>")
+        return "".join(html_items)
+
+    years = data["years"]
+
+    if not years:
+        body = """
+        <div class="hero">
+          <h2>Monthly Income</h2>
+          <p>No matching data found for the selected filters.</p>
+        </div>
+        """
+        return _base_page("dgi-dash monthly income", body)
+
+    def render_matrix(rows, value_getter, *, top_rows=None, bottom_rows=None, money=True):
+        header = "".join(f"<th class='money'>{year}</th>" for year in years)
+        body_rows = []
+        for row in top_rows or []:
+            values = "".join(
+                f"<td class='money'>{_money(value_getter(row, year)) if money else _text(value_getter(row, year))}</td>"
+                for year in years
+            )
+            body_rows.append(f"<tr class='summary-row'><td>{_text(row['label'])}</td>{values}</tr>")
+        for row in rows:
+            values = "".join(
+                f"<td class='money'>{_money(value_getter(row, year)) if money else _text(value_getter(row, year))}</td>"
+                for year in years
+            )
+            body_rows.append(f"<tr><td>{_text(row['label'])}</td>{values}</tr>")
+        for row in bottom_rows or []:
+            values = "".join(
+                f"<td class='money'>{_money(value_getter(row, year)) if money else _text(value_getter(row, year))}</td>"
+                for year in years
+            )
+            body_rows.append(f"<tr class='total-row'><td>{_text(row['label'])}</td>{values}</tr>")
+        return f"<div class='report-wrap'><table class='report-table'><thead><tr><th>Month</th>{header}</tr></thead><tbody>{''.join(body_rows)}</tbody></table></div>"
+
+    summary_rows = [
+        {"label": "Avg. Monthly", "values": data["avg_monthly"]},
+        {"label": "YoY Increase", "values": {year: (None if data["annual_yoy"][year] is None else data["annual_yoy"][year] * 100) for year in years}},
+    ]
+    total_rows = [
+        {"label": "Total", "values": data["annual_totals"]},
+    ]
+
+    def money_or_percent(row, year):
+        value = row["values"].get(year)
+        if row["label"] == "YoY Increase":
+            return "" if value is None else f"{value:,.1f}%"
+        return _money(value or 0.0)
+
+    t3m_table = render_matrix(data["rolling_three_month"], lambda row, year: row["values"].get(year, 0.0))
+    summary_header = "".join(f"<th class='money'>{year}</th>" for year in years)
+    summary_rows_html = "".join(
+        f"<tr class='summary-row'><td>{_text(row['label'])}</td>" + "".join(
+            f"<td class='money'>{money_or_percent(row, year)}</td>" for year in years
+        ) + "</tr>"
+        for row in summary_rows
+    )
+    total_rows_html = "".join(
+        f"<tr class='total-row'><td>{_text(row['label'])}</td>" + "".join(
+            f"<td class='money'>{_money(row['values'][year])}</td>" for year in years
+        ) + "</tr>"
+        for row in total_rows
+    )
+    monthly_body_rows = "".join(
+        f"<tr><td>{_text(row['label'])}</td>" + "".join(
+            f"<td class='money'>{_money(row['values'].get(year, 0.0))}</td>" for year in years
+        ) + "</tr>"
+        for row in data["monthly_matrix"]
+    )
+    monthly_table = (
+        f"<div class='report-wrap'><table class='report-table'>"
+        f"<thead><tr><th>Month</th>{summary_header}</tr></thead>"
+        f"<tbody>{summary_rows_html}{monthly_body_rows}{total_rows_html}</tbody></table></div>"
+    )
+
+    body = f"""
+    <div class="hero">
+      <h2>Monthly Income</h2>
+      <p>DB-backed replacement for the spreadsheet monthly tab. Monthly averages, YoY growth, month-by-month totals, and annual totals now live in one matrix.</p>
+    </div>
+    <div class="card full">
+      <form method="get" action="/reports/monthly-income">
+        <div class="filters">
+          <div><label>Income</label><select name="income_mode">{options(['dividends', 'interest', 'combined'], data['income_mode'], include_all=False)}</select></div>
+          <div><label>Tax Treatment</label><select name="tax_treatment">{options(data['available_tax_treatments'], data['tax_treatment'])}</select></div>
+        </div>
+        <div class="actions">
+          <button class="button" type="submit">Apply Filters</button>
+          <a class="button secondary" href="/reports/monthly-income">Reset</a>
+        </div>
+      </form>
+    </div>
+    <div class="card full">
+      <h3>Monthly Matrix</h3>
+      {monthly_table}
+    </div>
+    <div class="card full">
+      <h3>Rolling 3-Month Average</h3>
+      {t3m_table}
+    </div>
+    """
+    return _base_page("dgi-dash monthly income", body)
 
 
 def render_securities(db_url=DEFAULT_DB_URL):
@@ -557,6 +730,10 @@ def create_app(db_url=DEFAULT_DB_URL):
                 return [body]
             if path == "/accounts":
                 body = render_accounts(db_url=db_url).encode("utf-8")
+                start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
+                return [body]
+            if path == "/reports/monthly-income":
+                body = render_monthly_income_report(params, db_url=db_url).encode("utf-8")
                 start_response("200 OK", [("Content-Type", "text/html; charset=utf-8")])
                 return [body]
             if path.startswith("/accounts/"):

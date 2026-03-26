@@ -14,6 +14,12 @@ from db.utils import (
 session = create_session()
 
 DATA_DIR = "data/etrade"
+CAP_GAIN_ACTIVITY_TYPES = {"ST CAP GAIN DISTRIBUTION", "LT CAP GAIN DISTRIBUTION"}
+DIVIDEND_ACTIVITY_TYPES = {
+    "DIVIDEND",
+    "QUALIFIED DIVIDEND",
+    "SUBSTITUTE DIVIDEND",
+} | CAP_GAIN_ACTIVITY_TYPES
 
 
 def _format_account_label(account_number):
@@ -47,7 +53,15 @@ def _parse_etrade_legacy(lines, filepath):
         return None, None
 
     df["transactiontype"] = df["transactiontype"].astype(str).str.upper().str.strip()
-    df = df[df["transactiontype"].isin(["DIVIDEND", "QUALIFIED DIVIDEND"])]
+    if "description" in df.columns:
+        df["description"] = df["description"].fillna("").astype(str)
+    else:
+        df["description"] = ""
+    legacy_cap_gain_mask = df["description"].str.upper().str.contains(
+        "S/T CAPITAL GAIN|L/T CAPITAL GAIN|ST CAP GAIN|LT CAP GAIN",
+        na=False,
+    )
+    df = df[df["transactiontype"].isin(DIVIDEND_ACTIVITY_TYPES) | legacy_cap_gain_mask]
     df["is_qualified"] = df["transactiontype"] == "QUALIFIED DIVIDEND"
 
     if df.empty:
@@ -60,12 +74,28 @@ def _parse_etrade_legacy(lines, filepath):
     df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0)
     df["account"] = _format_account_label(account_number)
     df["type"] = "DIVIDEND"
-    if "description" in df.columns:
-        reinvest_mask = df["description"].astype(str).str.upper().str.contains("REINVEST", na=False)
-        df.loc[reinvest_mask, "type"] = "REINVESTMENT"
+    cap_gain_mask = df["transactiontype"].isin(CAP_GAIN_ACTIVITY_TYPES) | legacy_cap_gain_mask.loc[df.index]
+    df.loc[cap_gain_mask, "type"] = "CAPITAL_GAIN_DISTRIBUTION"
+    df["reporting_tag"] = None
+    df["annotation_note"] = None
+    df.loc[cap_gain_mask, "reporting_tag"] = "CAPITAL_GAIN_DISTRIBUTION"
+    df.loc[
+        cap_gain_mask,
+        "annotation_note",
+    ] = "Source-labeled capital gain distribution; treated as dividend-equivalent in reporting."
+    reinvest_mask = df["description"].astype(str).str.upper().str.contains("REINVEST", na=False)
+    df.loc[reinvest_mask, "type"] = "REINVESTMENT"
     df["source_system"] = "etrade_csv"
     df["source_file"] = filepath
     df["raw_action"] = df["transactiontype"]
+    df.loc[
+        cap_gain_mask & df["description"].str.upper().str.contains("L/T CAPITAL GAIN|LT CAP GAIN", na=False),
+        "raw_action",
+    ] = "LT CAP GAIN DISTRIBUTION"
+    df.loc[
+        cap_gain_mask & df["description"].str.upper().str.contains("S/T CAPITAL GAIN|ST CAP GAIN", na=False),
+        "raw_action",
+    ] = "ST CAP GAIN DISTRIBUTION"
     df = drop_unknown_placeholder_rows(
         df,
         column_name="symbol",
@@ -99,7 +129,7 @@ def _parse_etrade_new(lines, filepath):
         return None, None
 
     df["activity type"] = df["activity type"].astype(str).str.upper().str.strip()
-    df = df[df["activity type"].isin(["DIVIDEND", "QUALIFIED DIVIDEND"])]
+    df = df[df["activity type"].isin(DIVIDEND_ACTIVITY_TYPES)]
     df["is_qualified"] = df["activity type"] == "QUALIFIED DIVIDEND"
 
     if df.empty:
@@ -122,6 +152,15 @@ def _parse_etrade_new(lines, filepath):
     ).fillna(0)
     df["account"] = _format_account_label(account_number)
     df["type"] = "DIVIDEND"
+    cap_gain_mask = df["activity type"].isin(CAP_GAIN_ACTIVITY_TYPES)
+    df.loc[cap_gain_mask, "type"] = "CAPITAL_GAIN_DISTRIBUTION"
+    df["reporting_tag"] = None
+    df["annotation_note"] = None
+    df.loc[cap_gain_mask, "reporting_tag"] = "CAPITAL_GAIN_DISTRIBUTION"
+    df.loc[
+        cap_gain_mask,
+        "annotation_note",
+    ] = "Source-labeled capital gain distribution; treated as dividend-equivalent in reporting."
     if "description" in df.columns:
         reinvest_mask = df["description"].astype(str).str.upper().str.contains("REINVEST", na=False)
         df.loc[reinvest_mask, "type"] = "REINVESTMENT"
@@ -169,6 +208,8 @@ def import_transactions(df):
             source_system=row.get("source_system"),
             source_file=row.get("source_file"),
             raw_action=row.get("raw_action"),
+            reporting_tag=row.get("reporting_tag"),
+            annotation_note=row.get("annotation_note"),
         )
         if inserted:
             imported_count += 1

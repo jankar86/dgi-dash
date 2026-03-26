@@ -157,6 +157,8 @@ def upsert_transaction(
     source_file=None,
     source_row_hash=None,
     raw_action=None,
+    reporting_tag=None,
+    annotation_note=None,
     imported_at=None,
 ):
     if _contains_unknown_placeholder(account_name):
@@ -250,6 +252,8 @@ def upsert_transaction(
             source_file=source_file,
             source_row_hash=source_row_hash,
             raw_action=raw_action,
+            reporting_tag=reporting_tag,
+            annotation_note=annotation_note,
             imported_at=imported_at or datetime.utcnow(),
         )
     )

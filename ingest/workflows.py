@@ -157,6 +157,20 @@ def _run_post_create_migrations(engine):
         )
         conn.execute(
             text(
+                "DELETE FROM transactions "
+                "WHERE txn_type = 'DIVIDEND' AND amount < 0 "
+                "  AND EXISTS ("
+                "    SELECT 1 FROM transactions t2 "
+                "    WHERE t2.account_id = transactions.account_id "
+                "      AND t2.security_id = transactions.security_id "
+                "      AND t2.date = transactions.date "
+                "      AND t2.amount = transactions.amount "
+                "      AND t2.txn_type = 'REINVESTMENT'"
+                "  )"
+            )
+        )
+        conn.execute(
+            text(
                 "UPDATE transactions "
                 "SET txn_type = 'REINVESTMENT' "
                 "WHERE txn_type = 'DIVIDEND' AND amount < 0"
@@ -165,6 +179,10 @@ def _run_post_create_migrations(engine):
         _merge_security_case_aliases(conn)
         _move_interest_transactions_to_manual_account(conn)
         _normalize_broker_account_names(conn)
+        _normalize_paramount_tickers(conn)
+        _reconcile_cap_gain_distribution_annotations(conn)
+        _reclassify_etrade_cap_gain_distributions(conn)
+        _apply_manual_transaction_overrides(conn)
         _populate_account_metadata(conn)
 
 
@@ -204,10 +222,12 @@ def _ensure_transactions_schema(engine):
             "source_file",
             "source_row_hash",
             "raw_action",
+            "reporting_tag",
+            "annotation_note",
             "imported_at",
         )
         needs_rebuild = any(token not in create_sql for token in required_tokens)
-        needs_rebuild = needs_rebuild or "txn_type VARCHAR(20)" not in create_sql
+        needs_rebuild = needs_rebuild or "txn_type VARCHAR(32)" not in create_sql
         needs_rebuild = needs_rebuild or "NUMERIC(20, 2)" not in create_sql
         needs_rebuild = needs_rebuild or "NUMERIC(20, 6)" not in create_sql
         if not needs_rebuild:
@@ -229,7 +249,7 @@ def _ensure_transactions_schema(engine):
                     id INTEGER PRIMARY KEY,
                     account_id INTEGER NOT NULL,
                     security_id INTEGER NOT NULL,
-                    txn_type VARCHAR(20) NOT NULL,
+                    txn_type VARCHAR(32) NOT NULL,
                     date DATE NOT NULL,
                     quantity NUMERIC(20, 6) NOT NULL DEFAULT 0,
                     price NUMERIC(20, 6) NOT NULL DEFAULT 0,
@@ -240,6 +260,8 @@ def _ensure_transactions_schema(engine):
                     source_file VARCHAR(255),
                     source_row_hash VARCHAR(64) UNIQUE,
                     raw_action VARCHAR(128),
+                    reporting_tag VARCHAR(64),
+                    annotation_note VARCHAR(255),
                     imported_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY(account_id) REFERENCES accounts(id),
                     FOREIGN KEY(security_id) REFERENCES securities(id),
@@ -253,7 +275,8 @@ def _ensure_transactions_schema(engine):
                 (
                     id, account_id, security_id, txn_type, date,
                     quantity, price, amount, is_qualified, allocation_status,
-                    source_system, source_file, source_row_hash, raw_action, imported_at
+                    source_system, source_file, source_row_hash, raw_action,
+                    reporting_tag, annotation_note, imported_at
                 )
             SELECT
                 id,
@@ -270,6 +293,8 @@ def _ensure_transactions_schema(engine):
                 {src_col('source_file', 'NULL')},
                 {src_col('source_row_hash', 'NULL')},
                 {src_col('raw_action', 'NULL')},
+                {src_col('reporting_tag', 'NULL')},
+                {src_col('annotation_note', 'NULL')},
                 COALESCE({src_col('imported_at', 'CURRENT_TIMESTAMP')}, CURRENT_TIMESTAMP)
             FROM transactions
         """
@@ -299,6 +324,161 @@ def _ensure_transaction_indexes(engine):
                 "CREATE INDEX IF NOT EXISTS idx_transactions_type_date "
                 "ON transactions(txn_type, date)"
             )
+        )
+
+
+def _reconcile_cap_gain_distribution_annotations(conn):
+    # Remove older inferred annotations/derived rows and normalize explicit
+    # source-labeled capital gain distributions into their own txn type.
+    conn.execute(
+        text(
+            """
+            DELETE FROM transactions
+            WHERE reporting_tag = 'CAPITAL_GAIN_DISTRIBUTION'
+              AND txn_type = 'DIVIDEND'
+              AND annotation_note = 'Derived positive dividend entry from capital gain distribution reinvestment; included for dividend-equivalent reporting.'
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            UPDATE transactions
+            SET txn_type = 'CAPITAL_GAIN_DISTRIBUTION'
+            WHERE reporting_tag = 'CAPITAL_GAIN_DISTRIBUTION'
+              AND txn_type = 'DIVIDEND'
+            """
+        )
+    )
+    conn.execute(
+        text(
+            """
+            UPDATE transactions
+            SET reporting_tag = NULL,
+                annotation_note = NULL
+            WHERE reporting_tag = 'CAPITAL_GAIN_DISTRIBUTION'
+              AND txn_type = 'REINVESTMENT'
+            """
+        )
+    )
+
+
+def _reclassify_etrade_cap_gain_distributions(conn):
+    rows = conn.execute(
+        text(
+            """
+            SELECT DISTINCT source_file
+            FROM transactions
+            WHERE source_system = 'etrade_csv'
+              AND source_file IS NOT NULL
+            ORDER BY source_file
+            """
+        )
+    ).fetchall()
+
+    for (source_file,) in rows:
+        if not source_file or not os.path.exists(source_file):
+            continue
+
+        _account_number, df = import_etrade_csv.detect_etrade_account_and_data(source_file)
+        if df is None or df.empty:
+            continue
+
+        cap_gain_rows = df[df["type"] == "CAPITAL_GAIN_DISTRIBUTION"]
+        if cap_gain_rows.empty:
+            continue
+
+        for _, row in cap_gain_rows.iterrows():
+            conn.execute(
+                text(
+                    """
+                    UPDATE transactions
+                    SET txn_type = 'CAPITAL_GAIN_DISTRIBUTION',
+                        raw_action = :raw_action,
+                        reporting_tag = 'CAPITAL_GAIN_DISTRIBUTION',
+                        annotation_note = :annotation_note
+                    WHERE source_system = 'etrade_csv'
+                      AND source_file = :source_file
+                      AND date = :date
+                      AND amount = :amount
+                      AND txn_type = 'DIVIDEND'
+                      AND account_id = (SELECT id FROM accounts WHERE name = :account_name)
+                      AND security_id = (SELECT id FROM securities WHERE ticker = :symbol)
+                    """
+                ),
+                {
+                    "raw_action": row.get("raw_action"),
+                    "annotation_note": row.get("annotation_note"),
+                    "source_file": source_file,
+                    "date": row["date"].date() if hasattr(row["date"], "date") else row["date"],
+                    "amount": float(row["amount"]),
+                    "account_name": row["account"],
+                    "symbol": str(row["symbol"]).strip().upper(),
+                },
+            )
+
+
+def _apply_manual_transaction_overrides(conn):
+    # User-reviewed overrides for cases where the source exports preserve the
+    # reinvestment leg but not a separate positive distribution row in the
+    # current file set. Keep these explicit and narrow.
+    overrides = [
+        {
+            "account_name": "etr-3006",
+            "symbol": "VDIGX",
+            "txn_type": "CAPITAL_GAIN_DISTRIBUTION",
+            "date": "2025-12-24",
+            "amount": 1276.34,
+            "source_system": "manual_override",
+            "source_file": "derived:manual_cap_gain_override",
+            "raw_action": "LT CAP GAIN DISTRIBUTION",
+            "reporting_tag": "CAPITAL_GAIN_DISTRIBUTION",
+            "annotation_note": "User-classified derived capital gain distribution from reinvestment leg.",
+        },
+    ]
+
+    for row in overrides:
+        conn.execute(
+            text(
+                """
+                INSERT INTO transactions
+                    (
+                        account_id, security_id, txn_type, date, quantity, price, amount,
+                        is_qualified, allocation_status, source_system, source_file,
+                        source_row_hash, raw_action, reporting_tag, annotation_note, imported_at
+                    )
+                SELECT
+                    a.id,
+                    s.id,
+                    :txn_type,
+                    :date,
+                    0,
+                    0,
+                    :amount,
+                    0,
+                    'ALLOCATED',
+                    :source_system,
+                    :source_file,
+                    NULL,
+                    :raw_action,
+                    :reporting_tag,
+                    :annotation_note,
+                    CURRENT_TIMESTAMP
+                FROM accounts a
+                JOIN securities s ON s.ticker = :symbol
+                WHERE a.name = :account_name
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM transactions t
+                      WHERE t.account_id = a.id
+                        AND t.security_id = s.id
+                        AND t.txn_type = :txn_type
+                        AND t.date = :date
+                        AND t.amount = :amount
+                  )
+                """
+            ),
+            row,
         )
 
 
@@ -398,21 +578,104 @@ def _move_interest_transactions_to_manual_account(conn):
             "manual_account_id": manual_account_id,
         },
     )
-    conn.execute(
-        text(
-            """
-            UPDATE transactions
-            SET account_id = :manual_account_id,
-                allocation_status = 'ALLOCATED'
-            WHERE security_id = :interest_security_id
-              AND account_id != :manual_account_id
-            """
-        ),
-        {
-            "interest_security_id": interest_security_id,
-            "manual_account_id": manual_account_id,
-        },
-    )
+
+
+def _normalize_paramount_tickers(conn):
+    alias_map = {
+        "92556H206": "PARA",
+        "92556H305": "PARAP",
+    }
+
+    def ensure_security(ticker):
+        security_id = conn.execute(
+            text("SELECT id FROM securities WHERE ticker = :ticker LIMIT 1"),
+            {"ticker": ticker},
+        ).scalar()
+        if security_id:
+            return security_id
+        conn.execute(
+            text("INSERT INTO securities(ticker) VALUES (:ticker)"),
+            {"ticker": ticker},
+        )
+        return conn.execute(
+            text("SELECT id FROM securities WHERE ticker = :ticker LIMIT 1"),
+            {"ticker": ticker},
+        ).scalar()
+
+    for old_ticker, new_ticker in alias_map.items():
+        old_id = conn.execute(
+            text("SELECT id FROM securities WHERE ticker = :ticker LIMIT 1"),
+            {"ticker": old_ticker},
+        ).scalar()
+        if not old_id:
+            continue
+        new_id = ensure_security(new_ticker)
+        conn.execute(
+            text(
+                """
+                DELETE FROM transactions
+                WHERE security_id = :old_id
+                  AND EXISTS (
+                    SELECT 1 FROM transactions t2
+                    WHERE t2.security_id = :new_id
+                      AND t2.account_id = transactions.account_id
+                      AND t2.txn_type = transactions.txn_type
+                      AND t2.date = transactions.date
+                      AND t2.amount = transactions.amount
+                  )
+                """
+            ),
+            {"old_id": old_id, "new_id": new_id},
+        )
+        conn.execute(
+            text("UPDATE transactions SET security_id = :new_id WHERE security_id = :old_id"),
+            {"old_id": old_id, "new_id": new_id},
+        )
+        conn.execute(
+            text("DELETE FROM securities WHERE id = :old_id"),
+            {"old_id": old_id},
+        )
+
+    blank_id = conn.execute(
+        text("SELECT id FROM securities WHERE ticker = '' LIMIT 1")
+    ).scalar()
+    parp_id = ensure_security("PARAP")
+    if blank_id:
+        conn.execute(
+            text(
+                """
+                DELETE FROM transactions
+                WHERE security_id = :blank_id
+                  AND account_id IN (SELECT id FROM accounts WHERE name = 'etr-3006')
+                  AND txn_type = 'DIVIDEND'
+                  AND date = '2024-04-01'
+                  AND amount = 77.63
+                  AND EXISTS (
+                    SELECT 1 FROM transactions t2
+                    WHERE t2.security_id = :parp_id
+                      AND t2.account_id = transactions.account_id
+                      AND t2.txn_type = transactions.txn_type
+                      AND t2.date = transactions.date
+                      AND t2.amount = transactions.amount
+                  )
+                """
+            ),
+            {"blank_id": blank_id, "parp_id": parp_id},
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE transactions
+                SET security_id = :parp_id
+                WHERE security_id = :blank_id
+                  AND account_id IN (SELECT id FROM accounts WHERE name = 'etr-3006')
+                  AND txn_type = 'DIVIDEND'
+                  AND date = '2024-04-01'
+                  AND amount = 77.63
+                """
+            ),
+            {"blank_id": blank_id, "parp_id": parp_id},
+        )
 
 
 def _normalize_broker_account_names(conn):
